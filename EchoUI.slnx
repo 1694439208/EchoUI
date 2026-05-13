@@ -2,7 +2,6 @@
   <Folder Name="/Demo/">
     <Project Path="EchoUI.Demo.Web/EchoUI.Demo.Web.csproj" />
     <Project Path="EchoUI.Demo.Win32/EchoUI.Demo.Win32.csproj" />
-    <Project Path="EchoUI.Demo.Avalonia/EchoUI.Demo.Avalonia.csproj" />
     <Project Path="EchoUI.Demo/EchoUI.Demo.csproj" />
   </Folder>
   <Folder Name="/EchoUI/">
@@ -10,7 +9,6 @@
     <Project Path="EchoUI.Generator/EchoUI.Generator.csproj" />
     <Project Path="EchoUI.Render.Web/EchoUI.Render.Web.csproj" />
     <Project Path="EchoUI.Render.Win32/EchoUI.Render.Win32.csproj" />
-    <Project Path="EchoUI.Render.Avalonia/EchoUI.Render.Avalonia.csproj" />
   </Folder>
   <Folder Name="/Tools/">
     <Project Path="EchoUI.Tools.Serial/EchoUI.Tools.Serial.csproj" />
