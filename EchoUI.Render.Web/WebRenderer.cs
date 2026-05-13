@@ -1,6 +1,7 @@
 ﻿using EchoUI.Core;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices.JavaScript;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,8 @@ namespace EchoUI.Render.Web
     {
         private readonly string _rootContainerId;
         private static readonly Dictionary<(string, string), Delegate> EventHandlers = new();
+        private readonly Dictionary<string, List<string>> _childrenByParent = new();
+        private readonly Dictionary<string, string> _parentByChild = new();
 
         public WebRenderer(string rootContainerId)
         {
@@ -45,6 +48,8 @@ namespace EchoUI.Render.Web
         {
             var parentId = (parent as string) ?? _rootContainerId;
             var childId = (string)child;
+
+            RegisterChild(parentId, childId, index);
             DomInterop.AddChild(parentId, childId, index);
         }
 
@@ -52,6 +57,8 @@ namespace EchoUI.Render.Web
         {
             var parentId = (parent as string) ?? _rootContainerId;
             var childId = (string)child;
+
+            ReleaseSubtree(childId);
             DomInterop.RemoveChild(parentId, childId);
         }
 
@@ -59,6 +66,8 @@ namespace EchoUI.Render.Web
         {
             var parentId = (parent as string) ?? _rootContainerId;
             var childId = (string)child;
+
+            MoveRegisteredChild(parentId, childId, newIndex);
             DomInterop.MoveChild(parentId, childId, newIndex);
         }
 
@@ -83,38 +92,65 @@ namespace EchoUI.Render.Web
             // [!重要!] 为了保持不同平台的一致性，为不同类型的元素应用默认样式
             switch (newProps)
             {
-                case ContainerProps p:
+                case ContainerProps containerProps:
                     domPatch.Styles ??= new();
+                    domPatch.Attributes ??= new();
                     domPatch.Styles["display"] = "flex";
                     domPatch.Styles["box-sizing"] = "border-box";
-                    domPatch.Styles["flex-direction"] = ToCss(p.Direction ?? LayoutDirection.Vertical);
-                    domPatch.Styles["justify-content"] = ToCss(p.JustifyContent ?? JustifyContent.Start);
-                    domPatch.Styles["align-items"] = ToCss(p.AlignItems ?? AlignItems.Start);
-                    domPatch.Styles["overflow"] = (p.Overflow.HasValue) ? ToCss(p.Overflow) : null;
-                    if (p.Float)
+                    domPatch.Styles["position"] = containerProps.Float ? "absolute" : "relative";
+                    domPatch.Styles["flex-direction"] = ToCss(containerProps.Direction ?? LayoutDirection.Vertical);
+                    domPatch.Styles["justify-content"] = ToCss(containerProps.JustifyContent ?? JustifyContent.Start);
+                    domPatch.Styles["align-items"] = ToCss(containerProps.AlignItems ?? AlignItems.Start);
+                    domPatch.Styles["overflow"] = containerProps.Float && !containerProps.Overflow.HasValue
+                        ? "visible"
+                        : ToCss(containerProps.Overflow ?? Overflow.Visible);
+                    domPatch.Styles["gap"] = $"{containerProps.Gap ?? 0}px";
+                    domPatch.Styles["background-color"] = ToCss(containerProps.BackgroundColor ?? Color.Transparent);
+                    domPatch.Styles["border-style"] = (containerProps.BorderStyle ?? BorderStyle.None).ToString().ToLowerInvariant();
+                    domPatch.Styles["border-width"] = $"{containerProps.BorderWidth ?? 0}px";
+                    domPatch.Styles["border-color"] = ToCss(containerProps.BorderColor ?? Color.Transparent);
+                    domPatch.Styles["border-radius"] = $"{containerProps.BorderRadius ?? 0}px";
+                    SetSpacingStyles(domPatch, "margin", containerProps.Margin, "0px");
+                    SetSpacingStyles(domPatch, "padding", containerProps.Padding, "0px");
+                    if (containerProps.Float)
                     {
-                        if (!p.Height.HasValue)
-                            domPatch.Styles["height"] = "0";
-                        if (!p.MinHeight.HasValue)
-                            domPatch.Styles["min-height"] = "0";
-                        if (!p.Width.HasValue)
-                            domPatch.Styles["width"] = "100%";
-                        domPatch.Styles["overflow"] = "visible";
+                        domPatch.Styles["left"] = "0px";
+                        domPatch.Styles["top"] = "0px";
                         domPatch.Styles["z-index"] = "1000";
+                        if (!containerProps.Width.HasValue)
+                            domPatch.Styles["width"] = "100%";
                     }
-                    domPatch.Styles["flex-shrink"] = p.FlexShrink.HasValue ? p.FlexShrink.Value.ToString() : "0";
-                    domPatch.Styles["flex-grow"] = p.FlexGrow.HasValue ? p.FlexGrow.Value.ToString() : "0";
+                    domPatch.Attributes["data-eui-float"] = containerProps.Float ? "true" : "false";
+                    domPatch.Attributes["data-eui-float-auto-width"] = containerProps.Float && !containerProps.Width.HasValue ? "true" : "false";
+                    domPatch.Styles["flex-shrink"] = containerProps.FlexShrink.HasValue ? containerProps.FlexShrink.Value.ToString() : "0";
+                    domPatch.Styles["flex-grow"] = containerProps.FlexGrow.HasValue ? containerProps.FlexGrow.Value.ToString() : "0";
                     break;
-                case TextProps:
+                case TextProps textProps:
                     domPatch.Styles ??= new();
                     domPatch.Styles["user-select"] = "none";
                     domPatch.Styles["white-space"] = "pre-wrap";
+                    domPatch.Styles["pointer-events"] = textProps.MouseThrough ? "none" : "auto";
                     break;
-                case InputProps:
+                case InputProps inputProps:
                     domPatch.Styles ??= new();
                     domPatch.Styles["width"] = "100%";
                     domPatch.Styles["height"] = "100%";
-                    domPatch.Styles["border"] = "none";
+                    domPatch.Styles["box-sizing"] = "border-box";
+                    domPatch.Styles["outline"] = "none";
+                    domPatch.Styles["appearance"] = "none";
+                    domPatch.Styles["-webkit-appearance"] = "none";
+                    domPatch.Styles["margin"] = "0px";
+                    domPatch.Styles["background-color"] = ToCss(inputProps.BackgroundColor ?? Color.White);
+                    domPatch.Styles["color"] = ToCss(inputProps.TextColor ?? Color.Black);
+                    domPatch.Styles["border-radius"] = "0px";
+                    SetSpacingStyles(domPatch, "padding", inputProps.Padding, "0px");
+
+                    var hasManagedInputBorder = inputProps.BorderColor.HasValue || inputProps.FocusedBorderColor.HasValue;
+                    domPatch.Styles["border-style"] = hasManagedInputBorder ? "solid" : "none";
+                    domPatch.Styles["border-width"] = hasManagedInputBorder ? "1px" : "0px";
+                    domPatch.Styles["border-color"] = ToCss(inputProps.BorderColor ?? Color.Transparent);
+                    SetOptionalAttribute(domPatch, "data-eui-input-border-color", ToCss(inputProps.BorderColor));
+                    SetOptionalAttribute(domPatch, "data-eui-input-focused-border-color", ToCss(inputProps.FocusedBorderColor));
                     break;
             }
 
@@ -147,31 +183,28 @@ namespace EchoUI.Render.Web
                         case nameof(ContainerProps.Padding): SetSpacingStyles(domPatch, "padding", propValue as Spacing?); break;
                         case nameof(ContainerProps.Overflow): domPatch.SetStyle("overflow", ToCss(propValue as Overflow?)); break;
                         case nameof(ContainerProps.Float):
+                            domPatch.SetAttribute("data-eui-float", propValue is true ? "true" : "false");
+                            domPatch.SetAttribute("data-eui-float-auto-width", propValue is true && !containerProps.Width.HasValue ? "true" : "false");
                             if (propValue is true)
                             {
-                                if (!containerProps.Height.HasValue)
-                                    domPatch.SetStyle("height", "0");
-                                if (!containerProps.MinHeight.HasValue)
-                                    domPatch.SetStyle("min-height", "0");
+                                domPatch.SetStyle("position", "absolute");
+                                domPatch.SetStyle("left", "0px");
+                                domPatch.SetStyle("top", "0px");
+                                domPatch.SetStyle("z-index", "1000");
                                 if (!containerProps.Width.HasValue)
                                     domPatch.SetStyle("width", "100%");
-                                domPatch.SetStyle("overflow", "visible");
-                                domPatch.SetStyle("z-index", "1000");
+                                if (!containerProps.Overflow.HasValue)
+                                    domPatch.SetStyle("overflow", "visible");
                             }
                             else
                             {
-                                // Reset to default or calculated values if Float is turned off dynamically (complex, but for now just clear/reset)
-                                // In a real reconciler we might need to re-apply Height/MinHeight/Overflow from other props if they exist.
-                                // For now, assuming Full Re-render or just standard patch flow.
-                                // If Float goes false, we likely need to clear these forced styles.
-                                if (!containerProps.Height.HasValue)
-                                    domPatch.SetStyle("height", null);
-                                if (!containerProps.MinHeight.HasValue)
-                                    domPatch.SetStyle("min-height", null);
+                                domPatch.SetStyle("position", "relative");
+                                domPatch.SetStyle("left", null);
+                                domPatch.SetStyle("top", null);
+                                domPatch.SetStyle("z-index", null);
                                 if (!containerProps.Width.HasValue)
                                     domPatch.SetStyle("width", null);
-                                domPatch.SetStyle("overflow", null); 
-                                domPatch.SetStyle("z-index", null);
+                                domPatch.SetStyle("overflow", ToCss(containerProps.Overflow));
                             }
                             break;
 
@@ -231,18 +264,40 @@ namespace EchoUI.Render.Web
                         // --- Input ---
                         case nameof(InputProps.Value): domPatch.SetAttribute("value", propValue); break;
                         case nameof(InputProps.OnValueChanged): domPatch.UpdateEvent("input", propValue); break;
+                        case nameof(InputProps.BackgroundColor): domPatch.SetStyle("background-color", ToCss(propValue as Color?)); break;
+                        case nameof(InputProps.TextColor): domPatch.SetStyle("color", ToCss(propValue as Color?)); break;
+                        case nameof(InputProps.BorderColor):
+                        case nameof(InputProps.FocusedBorderColor):
+                            break;
+                        case nameof(InputProps.Padding): SetSpacingStyles(domPatch, "padding", propValue as Spacing?); break;
                         default:
                             break;
                     }
                     break;
 
                 case NativeProps nativeProps:
-                    if (nativeProps.Properties == null || !nativeProps.Properties.Value.Data.ContainsKey(propName))
+                    var hasNativeProperty = nativeProps.Properties != null && nativeProps.Properties.Value.Data.ContainsKey(propName);
+                    if (!hasNativeProperty)
+                    {
+                        if (IsNativeEventName(propName))
+                        {
+                            domPatch.UpdateEvent(propName, null);
+                        }
+                        else
+                        {
+                            domPatch.RemoveAttribute(propName);
+                        }
                         break;
+                    }
+
                     var propValueType = propValue?.GetType();
                     if (propValueType != null && typeof(Delegate).IsAssignableFrom(propValueType))
                     {
                         domPatch.UpdateEvent(propName, propValue);
+                    }
+                    else if (propValue == null)
+                    {
+                        domPatch.RemoveAttribute(propName);
                     }
                     else
                     {
@@ -283,20 +338,35 @@ namespace EchoUI.Render.Web
             foreach (var (propName, transition) in data)
             {
                 var cssProp = CSharpPropToCssProp(propName);
-                if (cssProp == null) continue;
+                if (cssProp == null)
+                {
+                    LogDebug($"[EchoUI.Web] Unsupported transition property '{propName}' was ignored.");
+                    continue;
+                }
 
                 var cssEasing = ToCss(transition.Easing);
                 if (sb.Length > 0) sb.Append(", ");
                 sb.Append($"{cssProp} {transition.DurationMs}ms {cssEasing}");
             }
-            return sb.ToString();
+            return sb.Length > 0 ? sb.ToString() : "none";
         }
 
         private string? CSharpPropToCssProp(string propName) => propName switch
         {
-            nameof(ContainerProps.BackgroundColor) => "background-color",
+            nameof(ContainerProps.Width) => "width",
+            nameof(ContainerProps.Height) => "height",
+            nameof(ContainerProps.MinWidth) => "min-width",
+            nameof(ContainerProps.MinHeight) => "min-height",
+            nameof(ContainerProps.MaxWidth) => "max-width",
+            nameof(ContainerProps.MaxHeight) => "max-height",
             nameof(ContainerProps.Margin) => "margin",
-            _ => propName
+            nameof(ContainerProps.Padding) => "padding",
+            nameof(ContainerProps.BackgroundColor) => "background-color",
+            nameof(ContainerProps.BorderColor) => "border-color",
+            nameof(ContainerProps.BorderWidth) => "border-width",
+            nameof(ContainerProps.BorderRadius) => "border-radius",
+            nameof(ContainerProps.Gap) => "gap",
+            _ => null
         };
 
         private string ToCss(Easing easing) => easing switch
@@ -308,12 +378,36 @@ namespace EchoUI.Render.Web
             _ => "linear"
         };
 
-        private void SetSpacingStyles(DomPropertyPatch patch, string key, Spacing? spacing)
+        private void SetSpacingStyles(DomPropertyPatch patch, string key, Spacing? spacing, string? defaultCss = null)
         {
-            patch.SetStyle($"{key}-top", ToCss(spacing?.Top));
-            patch.SetStyle($"{key}-right", ToCss(spacing?.Right));
-            patch.SetStyle($"{key}-bottom", ToCss(spacing?.Bottom));
-            patch.SetStyle($"{key}-left", ToCss(spacing?.Left));
+            patch.SetStyle($"{key}-top", ToCss(spacing?.Top) ?? defaultCss);
+            patch.SetStyle($"{key}-right", ToCss(spacing?.Right) ?? defaultCss);
+            patch.SetStyle($"{key}-bottom", ToCss(spacing?.Bottom) ?? defaultCss);
+            patch.SetStyle($"{key}-left", ToCss(spacing?.Left) ?? defaultCss);
+        }
+
+        private static void SetOptionalAttribute(DomPropertyPatch patch, string key, string? value)
+        {
+            if (value != null)
+            {
+                patch.SetAttribute(key, value);
+            }
+            else
+            {
+                patch.RemoveAttribute(key);
+            }
+        }
+
+        private static bool IsNativeEventName(string propName) => propName switch
+        {
+            "click" or "mousemove" or "mouseenter" or "mouseleave" or "mousedown" or "mouseup" or "keydown" or "keyup" or "input" => true,
+            _ => false
+        };
+
+        [Conditional("DEBUG")]
+        private static void LogDebug(string message)
+        {
+            Debug.WriteLine(message);
         }
         #endregion
 
@@ -337,18 +431,19 @@ namespace EchoUI.Render.Web
             {
                 UpdateHandler(elementId, "input", ip.OnValueChanged);
             }
-            else if (newProps is NativeProps nativeProps && nativeProps.Properties != null)
+            else if (newProps is NativeProps nativeProps)
             {
+                CleanupEventHandlersForElement(elementId);
+
+                if (nativeProps.Properties == null)
+                    return;
+
                 foreach (var item in nativeProps.Properties.Value.Data)
                 {
                     var propValueType = item.Value?.GetType();
                     if (propValueType != null && typeof(Delegate).IsAssignableFrom(propValueType))
                     {
                         UpdateHandler(elementId, item.Key, item.Value as Delegate);
-                    }
-                    else if (EventHandlers.ContainsKey((elementId, item.Key)))
-                    {
-                        UpdateHandler(elementId, item.Key, null);
                     }
                 }
             }
@@ -365,6 +460,103 @@ namespace EchoUI.Render.Web
             {
                 EventHandlers.Remove(key);
             }
+        }
+
+        private void RegisterChild(string parentId, string childId, int index)
+        {
+            if (_parentByChild.TryGetValue(childId, out var existingParentId) &&
+                _childrenByParent.TryGetValue(existingParentId, out var existingSiblings))
+            {
+                existingSiblings.Remove(childId);
+            }
+
+            _parentByChild[childId] = parentId;
+
+            if (!_childrenByParent.TryGetValue(parentId, out var children))
+            {
+                children = new List<string>();
+                _childrenByParent[parentId] = children;
+            }
+
+            children.Remove(childId);
+            if (index >= 0 && index < children.Count)
+            {
+                children.Insert(index, childId);
+            }
+            else
+            {
+                children.Add(childId);
+            }
+        }
+
+        private void MoveRegisteredChild(string parentId, string childId, int newIndex)
+        {
+            if (!_childrenByParent.TryGetValue(parentId, out var children))
+                return;
+
+            if (!children.Remove(childId))
+                return;
+
+            if (newIndex >= 0 && newIndex < children.Count)
+            {
+                children.Insert(newIndex, childId);
+            }
+            else
+            {
+                children.Add(childId);
+            }
+        }
+
+        private void ReleaseSubtree(string elementId)
+        {
+            if (_childrenByParent.TryGetValue(elementId, out var children))
+            {
+                foreach (var childId in children.ToArray())
+                {
+                    ReleaseSubtree(childId);
+                }
+
+                _childrenByParent.Remove(elementId);
+            }
+
+            CleanupEventHandlersForElement(elementId);
+
+            if (_parentByChild.TryGetValue(elementId, out var parentId))
+            {
+                if (_childrenByParent.TryGetValue(parentId, out var siblings))
+                {
+                    siblings.Remove(elementId);
+                }
+
+                _parentByChild.Remove(elementId);
+            }
+        }
+
+        private static void CleanupEventHandlersForElement(string elementId)
+        {
+            var keysToRemove = new List<(string, string)>();
+            foreach (var key in EventHandlers.Keys)
+            {
+                if (key.Item1 == elementId)
+                {
+                    keysToRemove.Add(key);
+                }
+            }
+
+            foreach (var key in keysToRemove)
+            {
+                EventHandlers.Remove(key);
+            }
+        }
+
+        private static MouseButton MapMouseButton(int button)
+        {
+            return button switch
+            {
+                2 => MouseButton.Right,
+                1 => MouseButton.Middle,
+                _ => MouseButton.Left
+            };
         }
 
         public IUpdateScheduler GetScheduler(object rootContainer) => new WebUpdateScheduler();
@@ -388,7 +580,7 @@ namespace EchoUI.Render.Web
                     break;
                 case Action<MouseButton> actionMouse:
                     var button = JsonSerializer.Deserialize<int>(eventArgsJson, WebRendererJsonContext.Default.Int32);
-                    actionMouse.Invoke((MouseButton)button);
+                    actionMouse.Invoke(MapMouseButton(button));
                     break;
                 case Action<int> actionInt:
                     var keyCode = JsonSerializer.Deserialize<int>(eventArgsJson, WebRendererJsonContext.Default.Int32);
@@ -406,16 +598,28 @@ namespace EchoUI.Render.Web
     {
         public Dictionary<string, string?>? Styles { get; set; }
         public Dictionary<string, object?>? Attributes { get; set; }
+        public List<string>? AttributesToRemove { get; set; }
         public List<string>? EventsToAdd { get; set; }
         public List<string>? EventsToRemove { get; set; }
         public void SetStyle(string key, string? value) { Styles ??= new(); Styles[key] = value; }
         public void SetAttribute(string key, object? value) { Attributes ??= new(); Attributes[key] = value; }
+        public void RemoveAttribute(string key) { AttributesToRemove ??= new(); if (!AttributesToRemove.Contains(key)) AttributesToRemove.Add(key); }
         public void UpdateEvent(string eventName, object? handler)
         {
-            if (handler != null) { EventsToAdd ??= new(); if (!EventsToAdd.Contains(eventName)) EventsToAdd.Add(eventName); }
-            else { EventsToRemove ??= new(); if (!EventsToRemove.Contains(eventName)) EventsToRemove.Add(eventName); }
+            if (handler != null)
+            {
+                EventsToAdd ??= new();
+                EventsToRemove?.Remove(eventName);
+                if (!EventsToAdd.Contains(eventName)) EventsToAdd.Add(eventName);
+            }
+            else
+            {
+                EventsToRemove ??= new();
+                EventsToAdd?.Remove(eventName);
+                if (!EventsToRemove.Contains(eventName)) EventsToRemove.Add(eventName);
+            }
         }
-        public bool HasContent() => (Styles?.Count > 0) || (Attributes?.Count > 0) || (EventsToAdd?.Count > 0) || (EventsToRemove?.Count > 0);
+        public bool HasContent() => (Styles?.Count > 0) || (Attributes?.Count > 0) || (AttributesToRemove?.Count > 0) || (EventsToAdd?.Count > 0) || (EventsToRemove?.Count > 0);
     }
 
 

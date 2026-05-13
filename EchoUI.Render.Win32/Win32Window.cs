@@ -162,6 +162,8 @@ namespace EchoUI.Render.Win32
                     return 0;
 
                 case NativeInterop.WM_DESTROY:
+                    _renderer?.Dispose();
+                    _renderer = null;
                     NativeInterop.PostQuitMessage(0);
                     return 0;
 

@@ -265,36 +265,66 @@ namespace EchoUI.Render.Win32
         {
             float contentWidth = FlexLayout.MeasureContentWidth(element, bounds.Width, bounds.Height);
             float contentHeight = FlexLayout.MeasureContentHeight(element, bounds.Width, bounds.Height);
-            bool showVertical = contentHeight > element.LayoutHeight;
-            bool showHorizontal = contentWidth > element.LayoutWidth;
+            bool alwaysShow = element.Overflow == Overflow.Scroll;
+            bool showVertical = alwaysShow || contentHeight > element.LayoutHeight;
+            bool showHorizontal = alwaysShow || contentWidth > element.LayoutWidth;
 
             if (!showVertical && !showHorizontal) return;
 
             const float scrollbarSize = 6;
+            using var trackBrush = new SolidBrush(System.Drawing.Color.FromArgb(36, 128, 128, 128));
             using var thumbBrush = new SolidBrush(System.Drawing.Color.FromArgb(128, 128, 128, 128));
 
             if (showVertical)
             {
-                float trackHeight = bounds.Height - (showHorizontal ? scrollbarSize + 2 : 0);
-                float thumbHeight = Math.Max(20, trackHeight * (element.LayoutHeight / contentHeight));
-                float maxScroll = contentHeight - element.LayoutHeight;
-                float thumbY = bounds.Y + (element.ScrollOffsetY / maxScroll) * (trackHeight - thumbHeight);
-                var thumbRect = new RectangleF(bounds.Right - scrollbarSize - 2, thumbY, scrollbarSize, thumbHeight);
+                float trackHeight = Math.Max(0, bounds.Height - (showHorizontal ? scrollbarSize + 2 : 0));
+                var trackRect = new RectangleF(bounds.Right - scrollbarSize - 2, bounds.Y, scrollbarSize, trackHeight);
+                if (alwaysShow && trackRect.Width > 0 && trackRect.Height > 0)
+                {
+                    using var trackPath = CreateRoundedRect(trackRect, scrollbarSize / 2);
+                    g.FillPath(trackBrush, trackPath);
+                }
 
-                using var thumbPath = CreateRoundedRect(thumbRect, scrollbarSize / 2);
-                g.FillPath(thumbBrush, thumbPath);
+                float maxScroll = Math.Max(0, contentHeight - element.LayoutHeight);
+                float thumbHeight = maxScroll > 0 && contentHeight > 0
+                    ? Math.Max(20, trackHeight * (element.LayoutHeight / contentHeight))
+                    : trackHeight;
+                float thumbY = maxScroll > 0
+                    ? bounds.Y + (element.ScrollOffsetY / maxScroll) * Math.Max(0, trackHeight - thumbHeight)
+                    : bounds.Y;
+                var thumbRect = new RectangleF(bounds.Right - scrollbarSize - 2, thumbY, scrollbarSize, Math.Max(0, thumbHeight));
+
+                if (thumbRect.Width > 0 && thumbRect.Height > 0)
+                {
+                    using var thumbPath = CreateRoundedRect(thumbRect, scrollbarSize / 2);
+                    g.FillPath(thumbBrush, thumbPath);
+                }
             }
 
             if (showHorizontal)
             {
-                float trackWidth = bounds.Width - (showVertical ? scrollbarSize + 2 : 0);
-                float thumbWidth = Math.Max(20, trackWidth * (element.LayoutWidth / contentWidth));
-                float maxScroll = contentWidth - element.LayoutWidth;
-                float thumbX = bounds.X + (element.ScrollOffsetX / maxScroll) * (trackWidth - thumbWidth);
-                var thumbRect = new RectangleF(thumbX, bounds.Bottom - scrollbarSize - 2, thumbWidth, scrollbarSize);
+                float trackWidth = Math.Max(0, bounds.Width - (showVertical ? scrollbarSize + 2 : 0));
+                var trackRect = new RectangleF(bounds.X, bounds.Bottom - scrollbarSize - 2, trackWidth, scrollbarSize);
+                if (alwaysShow && trackRect.Width > 0 && trackRect.Height > 0)
+                {
+                    using var trackPath = CreateRoundedRect(trackRect, scrollbarSize / 2);
+                    g.FillPath(trackBrush, trackPath);
+                }
 
-                using var thumbPath = CreateRoundedRect(thumbRect, scrollbarSize / 2);
-                g.FillPath(thumbBrush, thumbPath);
+                float maxScroll = Math.Max(0, contentWidth - element.LayoutWidth);
+                float thumbWidth = maxScroll > 0 && contentWidth > 0
+                    ? Math.Max(20, trackWidth * (element.LayoutWidth / contentWidth))
+                    : trackWidth;
+                float thumbX = maxScroll > 0
+                    ? bounds.X + (element.ScrollOffsetX / maxScroll) * Math.Max(0, trackWidth - thumbWidth)
+                    : bounds.X;
+                var thumbRect = new RectangleF(thumbX, bounds.Bottom - scrollbarSize - 2, Math.Max(0, thumbWidth), scrollbarSize);
+
+                if (thumbRect.Width > 0 && thumbRect.Height > 0)
+                {
+                    using var thumbPath = CreateRoundedRect(thumbRect, scrollbarSize / 2);
+                    g.FillPath(thumbBrush, thumbPath);
+                }
             }
         }
 

@@ -159,12 +159,24 @@ return Container([
 ```text
 display: flex
 box-sizing: border-box
+position: relative
 flex-direction: column
 justify-content: flex-start
 align-items: flex-start
 flex-grow: 0
 flex-shrink: 0
+overflow: visible
+gap: 0px
+margin: 0px
+padding: 0px
+background-color: rgba(0,0,0,0)
+border-style: none
+border-width: 0px
+border-color: rgba(0,0,0,0)
+border-radius: 0px
 ```
+
+当 `Float = true` 时，Web 渲染器会把该容器改为 overlay 语义：`position: absolute`、默认 `left/top = 0`、未显式设置 `Width` 时默认 `width: 100%`，并脱离常规 flex 文档流。
 
 `Container` 负责：
 
@@ -215,7 +227,10 @@ Container(
 ```text
 user-select: none
 white-space: pre-wrap
+pointer-events: none // 默认 MouseThrough = true 时
 ```
+
+字体、字号、字重和文本色如果未显式设置，仍由宿主页面与浏览器默认值决定。
 
 标准要求：
 
@@ -242,18 +257,34 @@ Text(
 ```text
 width: 100%
 height: 100%
-border: none
+box-sizing: border-box
+outline: none
+appearance: none
+-webkit-appearance: none
+margin: 0px
+padding: 0px
+background-color: rgba(255,255,255,1)
+color: rgba(0,0,0,1)
+border-style: none
+border-width: 0px
+border-color: rgba(0,0,0,0)
+border-radius: 0px
 ```
 
-当前 Web 渲染器只明确处理：
+当前 Web 渲染器会明确处理：
 
 - `Value` → DOM `value`。
 - `OnValueChanged` → DOM `input` 事件。
+- `BackgroundColor` → `background-color`。
+- `TextColor` → `color`。
+- `BorderColor` → `border-color`。
+- `FocusedBorderColor` → focus/blur 时切换 `border-color`。
+- `Padding` → `padding-*`。
 
 标准要求：
 
 - `Input` 必须作为受控输入使用：`Value` 与 `OnValueChanged` 成对出现。
-- 外观、尺寸、边框优先由外层 `Container` 控制。
+- 高度、宽度和复杂边框仍建议由外层 `Container` 承担。
 - 外层容器必须给定高度，否则 `input` 的 `height: 100%` 没有稳定参考。
 
 推荐：
@@ -535,6 +566,9 @@ Container(
 `Float = true` 在 Web 中会强制设置：
 
 ```text
+position: absolute
+left: 0
+top: 0
 height: 0 // 当 Height 未显式设置时
 min-height: 0 // 当 MinHeight 未显式设置时
 width: 100% // 当 Width 未显式设置时
@@ -627,8 +661,13 @@ Container(
 |---|---|
 | `Value` | `value` |
 | `OnValueChanged` | `input` event |
+| `BackgroundColor` | `background-color` |
+| `TextColor` | `color` |
+| `BorderColor` | `border-color` |
+| `FocusedBorderColor` | focus / blur 时切换 `border-color` |
+| `Padding` | `padding-top/right/bottom/left` |
 
-当前 `InputProps.BackgroundColor`、`TextColor`、`BorderColor`、`FocusedBorderColor`、`Padding` 在 Web 渲染器中尚未映射，输入框样式应先通过外层 `Container` 实现。
+如果未设置 `BorderColor` / `FocusedBorderColor`，Web 渲染器会保持无可见边框的 baseline；一旦显式设置任一边框色，渲染器会接管 `1px solid` 边框与焦点态颜色切换。
 
 ### 6.5 Color 映射
 
@@ -658,10 +697,21 @@ Transitions: [
 
 当前属性名转换明确支持：
 
-- `BackgroundColor` → `background-color`。
+- `Width` → `width`。
+- `Height` → `height`。
+- `MinWidth` → `min-width`。
+- `MinHeight` → `min-height`。
+- `MaxWidth` → `max-width`。
+- `MaxHeight` → `max-height`。
 - `Margin` → `margin`。
+- `Padding` → `padding`。
+- `BackgroundColor` → `background-color`。
+- `BorderColor` → `border-color`。
+- `BorderWidth` → `border-width`。
+- `BorderRadius` → `border-radius`。
+- `Gap` → `gap`。
 
-其他属性会按原属性名输出，使用前应确认 Web 渲染器是否能正确应用。
+未列出的属性不会生成 CSS transition；Debug 构建下会输出诊断。
 
 ## 7. Web 事件标准
 
@@ -864,16 +914,15 @@ Container(
 - 避免使用可变集合原地修改后再传回 `State`；应创建新集合实例。
 - 避免把业务状态封装在不可控基础控件内部。
 - 避免大量高频 `OnMouseMove` 中直接更新复杂 UI。
-- 避免依赖尚未映射的 Input 样式 Props。
+- 需要稳定视觉结果时，避免依赖宿主页面的默认字体、字号或文本色；应显式设置 `TextProps`。
 
 ## 11. 当前实现限制
 
 - `Props.AreEqual` 当前尚未在 `Reconciler` 中实际用于跳过更新。
 - `Effect` 当前在 render 阶段同步执行，不是 commit 后执行。
 - Web 调度器当前直接执行更新，未合并到 `requestAnimationFrame`。
-- Web 端删除 DOM 节点时，C# 静态事件字典未递归清理子树事件。
-- `Transition` 的 C# 属性名到 CSS 属性名转换仍较有限。
-- `InputProps` 中多个样式属性在 Web 渲染器中尚未映射。
+- `Transition` 的 C# 属性名到 CSS 属性名转换仍是白名单机制，未列出的属性不会生成 transition。
+- `TextProps` 未显式设置字体、字号、字重、颜色时，Web 端仍依赖宿主页面与浏览器默认值。
 - `CheckBox`、`ComboBox`、`RadioGroup`、`Switch`、`Tabs` 更接近非受控组件，初始 Props 后续变化不会自动同步内部状态。
 
 ## 12. 新组件验收标准

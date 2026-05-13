@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Drawing;
+using System.Diagnostics;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
@@ -9,7 +10,7 @@ namespace EchoUI.Render.Win32
     /// 使用 GDI+ 自绘模式，在单个 Win32 窗口上绘制所有 UI 元素。
     /// Input 元素使用嵌入的原生 Win32 Edit 控件。
     /// </summary>
-    public class Win32Renderer : IRenderer
+    public class Win32Renderer : IRenderer, IDisposable
     {
         private readonly Win32Window _window;
         private Win32Element? _rootElement;
@@ -28,6 +29,8 @@ namespace EchoUI.Render.Win32
         /// 防止 Edit 控件 EN_CHANGE 通知的递归触发
         /// </summary>
         private bool _suppressEditNotification;
+        private bool _disposed;
+        private readonly HashSet<string> _nativeDiagnostics = [];
 
         internal Win32Element? RootElement => _rootElement;
         internal Win32UpdateScheduler? Scheduler => _scheduler;
@@ -50,6 +53,10 @@ namespace EchoUI.Render.Win32
                 element.Width = Dimension.Percent(100);
                 element.Height = Dimension.Percent(100);
                 CreateEditControl(element);
+            }
+            else if (type != ElementCoreName.Container && type != ElementCoreName.Text && type != "img")
+            {
+                ReportNativeDiagnostic($"[EchoUI.Win32] Native type '{type}' is not fully supported and will be rendered as a generic container.");
             }
 
             return element;
@@ -134,10 +141,7 @@ namespace EchoUI.Render.Win32
             parentElement.Children.Remove(childElement);
             childElement.Parent = null;
 
-            // 销毁 Input 的 Edit 控件
-            DestroyEditControls(childElement);
-
-
+            ReleaseElementTree(childElement);
         }
 
         public void MoveChild(object parent, object child, int newIndex)
@@ -325,27 +329,45 @@ namespace EchoUI.Render.Win32
 
         private void ApplyNativeProperty(Win32Element element, NativeProps nativeProps, string propName, object? propValue)
         {
-            // NativeProps 的任意属性：仅处理已知的样式属性
-            if (propValue is Delegate) return; // 事件由 UpdateEventHandlers 处理
+            if (propValue is Delegate) return;
 
-            // 尝试作为文本内容
             if (propName == "textContent" || propName == "text")
             {
                 element.Text = propValue?.ToString();
+                return;
             }
 
-            // 处理图片
             if (element.ElementType == "img")
             {
-                if (propName == "src" && propValue is string src)
+                if (propName == "src")
                 {
-                    LoadImage(element, src);
+                    if (propValue is string src)
+                    {
+                        LoadImage(element, src);
+                    }
+                    else if (propValue == null && element.NativeImage != null)
+                    {
+                        element.NativeImage.Dispose();
+                        element.NativeImage = null;
+                    }
+                    return;
                 }
-                else if (propName == "style" && propValue is string style)
+
+                if (propName == "style")
                 {
-                    ParseStyle(element, style);
+                    if (propValue is string style)
+                    {
+                        ParseStyle(element, style);
+                    }
+                    else if (propValue == null)
+                    {
+                        ResetNativeStyle(element);
+                    }
+                    return;
                 }
             }
+
+            ReportNativeDiagnostic($"[EchoUI.Win32] Native property '{propName}' on '{nativeProps.Type}' is not supported.");
         }
 
         // --- 事件处理器同步 ---
@@ -392,40 +414,52 @@ namespace EchoUI.Render.Win32
             element.OnValueChanged = null;
         }
 
-        private static void ApplyNativeEventHandler(Win32Element element, string eventName, object? value)
+        private void ApplyNativeEventHandler(Win32Element element, string eventName, object? value)
         {
             switch (eventName)
             {
                 case "click" when value is Action<MouseButton> clickHandler:
                     element.OnClick = clickHandler;
-                    break;
+                    return;
                 case "click" when value is Action clickAction:
                     element.OnClick = _ => clickAction();
-                    break;
+                    return;
                 case "mousemove" when value is Action<Core.Point> mouseMoveHandler:
                     element.OnMouseMove = mouseMoveHandler;
-                    break;
+                    return;
                 case "mouseenter" when value is Action mouseEnterHandler:
                     element.OnMouseEnter = mouseEnterHandler;
-                    break;
+                    return;
                 case "mouseleave" when value is Action mouseLeaveHandler:
                     element.OnMouseLeave = mouseLeaveHandler;
-                    break;
+                    return;
                 case "mousedown" when value is Action mouseDownHandler:
                     element.OnMouseDown = mouseDownHandler;
-                    break;
+                    return;
                 case "mouseup" when value is Action mouseUpHandler:
                     element.OnMouseUp = mouseUpHandler;
-                    break;
+                    return;
                 case "keydown" when value is Action<int> keyDownHandler:
                     element.OnKeyDown = keyDownHandler;
-                    break;
+                    return;
                 case "keyup" when value is Action<int> keyUpHandler:
                     element.OnKeyUp = keyUpHandler;
-                    break;
+                    return;
                 case "input" when value is Action<string> inputHandler:
                     element.OnValueChanged = inputHandler;
-                    break;
+                    return;
+                default:
+                    ReportNativeDiagnostic($"[EchoUI.Win32] Native event '{eventName}' is not supported.");
+                    return;
+            }
+        }
+
+        [Conditional("DEBUG")]
+        private void ReportNativeDiagnostic(string message)
+        {
+            if (_nativeDiagnostics.Add(message))
+            {
+                Debug.WriteLine(message);
             }
         }
 
@@ -517,14 +551,42 @@ namespace EchoUI.Render.Win32
 
             if (_editElements.TryGetValue(editHwnd, out var element))
             {
-                int len = NativeInterop.GetWindowTextLength(editHwnd);
-                var buffer = new char[len + 1];
-                NativeInterop.GetWindowText(editHwnd, buffer, buffer.Length);
-                var text = new string(buffer, 0, len);
-
-                element.InputValue = text;
+                var text = GetWindowText(editHwnd);
                 element.OnValueChanged?.Invoke(text);
+
+                var syncContext = SynchronizationContext.Current;
+                if (syncContext != null)
+                {
+                    syncContext.Post(_ => RestoreControlledEditValue(element), null);
+                }
+                else
+                {
+                    RestoreControlledEditValue(element);
+                }
             }
+        }
+
+        private static string GetWindowText(nint editHwnd)
+        {
+            int len = NativeInterop.GetWindowTextLength(editHwnd);
+            var buffer = new char[len + 1];
+            NativeInterop.GetWindowText(editHwnd, buffer, buffer.Length);
+            return new string(buffer, 0, len);
+        }
+
+        private void RestoreControlledEditValue(Win32Element element)
+        {
+            if (element.EditHwnd == 0 || !NativeInterop.IsWindow(element.EditHwnd))
+                return;
+
+            var controlledValue = element.InputValue ?? string.Empty;
+            var currentValue = GetWindowText(element.EditHwnd);
+            if (currentValue == controlledValue)
+                return;
+
+            _suppressEditNotification = true;
+            NativeInterop.SetWindowText(element.EditHwnd, controlledValue);
+            _suppressEditNotification = false;
         }
 
         internal void HandleEditFocusChange(nint editHwnd, bool isFocused)
@@ -536,14 +598,25 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private void DestroyEditControls(Win32Element element)
+        private void ReleaseElementTree(Win32Element element)
+        {
+            foreach (var child in element.Children.ToArray())
+            {
+                ReleaseElementTree(child);
+            }
+
+            element.Children.Clear();
+            ReleasePlatformResources(element);
+            ClearNativeEventHandlers(element);
+            element.Parent = null;
+        }
+
+        private void ReleasePlatformResources(Win32Element element)
         {
             if (element.EditHwnd != 0)
             {
                 _editElements.Remove(element.EditHwnd);
 
-
-                // 清理 GDI 资源
                 if (element.NativeFontHandle != 0)
                 {
                     NativeInterop.DeleteObject(element.NativeFontHandle);
@@ -559,17 +632,42 @@ namespace EchoUI.Render.Win32
                     NativeInterop.DestroyWindow(element.EditHwnd);
                 element.EditHwnd = 0;
             }
+            else
+            {
+                if (element.NativeFontHandle != 0)
+                {
+                    NativeInterop.DeleteObject(element.NativeFontHandle);
+                    element.NativeFontHandle = 0;
+                }
+                if (element.NativeBrushHandle != 0)
+                {
+                    NativeInterop.DeleteObject(element.NativeBrushHandle);
+                    element.NativeBrushHandle = 0;
+                }
+            }
 
             if (element.NativeImage != null)
             {
                 element.NativeImage.Dispose();
                 element.NativeImage = null;
             }
+        }
 
-            foreach (var child in element.Children)
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+
+            if (_rootElement != null)
             {
-                DestroyEditControls(child);
+                ReleaseElementTree(_rootElement);
+                _rootElement = null;
             }
+
+            _floatingElements.Clear();
+            _editElements.Clear();
         }
 
         // --- 布局与重绘 ---
@@ -790,6 +888,13 @@ namespace EchoUI.Render.Win32
             };
         }
 
+
+        private static void ResetNativeStyle(Win32Element element)
+        {
+            element.Width = null;
+            element.Height = null;
+            element.BorderRadius = 0;
+        }
 
         private void LoadImage(Win32Element element, string src)
         {

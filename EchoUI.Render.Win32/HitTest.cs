@@ -10,7 +10,7 @@ namespace EchoUI.Render.Win32
     internal class HitTestManager
     {
         private Win32Element? _hoveredElement;
-        private Win32Element? _pressedElement;
+        private Win32Element? _pressedClickTarget;
         private Win32Element? _focusedElement;
         private readonly Win32Renderer _renderer;
 
@@ -156,7 +156,7 @@ namespace EchoUI.Render.Win32
             var moveTarget = FindHandler(hit, e => e.OnMouseMove != null);
             if (moveTarget != null)
             {
-                moveTarget.OnMouseMove?.Invoke(new Core.Point((int)x, (int)y));
+                moveTarget.OnMouseMove?.Invoke(ToLocalPoint(moveTarget, x, y));
             }
         }
 
@@ -166,7 +166,7 @@ namespace EchoUI.Render.Win32
         public void HandleMouseDown(Win32Element root, float x, float y, MouseButton button)
         {
             var hit = HitTest(root, x, y);
-            _pressedElement = hit;
+            _pressedClickTarget = FindHandler(hit, e => e.OnClick != null);
 
             if (hit != null)
             {
@@ -192,17 +192,16 @@ namespace EchoUI.Render.Win32
                 var upTarget = FindHandler(hit, e => e.OnMouseUp != null);
                 upTarget?.OnMouseUp?.Invoke();
 
-                // 如果按下和释放在同一个元素上（或其祖先），触发 Click
-                if (hit == _pressedElement || IsAncestorOf(_pressedElement, hit) || IsAncestorOf(hit, _pressedElement))
+                var releaseClickTarget = FindHandler(hit, e => e.OnClick != null);
+                if (releaseClickTarget != null && ReferenceEquals(releaseClickTarget, _pressedClickTarget))
                 {
-                    var clickTarget = FindHandler(hit, e => e.OnClick != null);
-                    clickTarget?.OnClick?.Invoke(button);
+                    releaseClickTarget.OnClick?.Invoke(button);
                 }
 
                 _renderer.RequestRepaint();
             }
 
-            _pressedElement = null;
+            _pressedClickTarget = null;
         }
 
         /// <summary>
@@ -313,6 +312,13 @@ namespace EchoUI.Render.Win32
                 current = current.Parent;
             }
             return null;
+        }
+
+        private static Core.Point ToLocalPoint(Win32Element element, float x, float y)
+        {
+            return new Core.Point(
+                (int)Math.Round(x - element.AbsoluteX, MidpointRounding.AwayFromZero),
+                (int)Math.Round(y - element.AbsoluteY, MidpointRounding.AwayFromZero));
         }
 
         private static Win32Element? FindScrollTarget(Win32Element? element)

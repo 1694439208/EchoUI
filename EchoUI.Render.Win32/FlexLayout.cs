@@ -47,6 +47,49 @@ namespace EchoUI.Render.Win32
             root.AbsoluteY = 0;
 
             LayoutChildren(root, viewportWidth, viewportHeight);
+
+            if (ClampScrollOffsetsRecursive(root, viewportWidth, viewportHeight))
+            {
+                LayoutChildren(root, viewportWidth, viewportHeight);
+            }
+        }
+
+        private static bool ClampScrollOffsetsRecursive(Win32Element element, float vpW, float vpH)
+        {
+            var changed = false;
+
+            foreach (var child in element.Children)
+            {
+                changed |= ClampScrollOffsetsRecursive(child, vpW, vpH);
+            }
+
+            if (element.Overflow != Overflow.Auto && element.Overflow != Overflow.Scroll &&
+                element.ScrollOffsetX == 0 && element.ScrollOffsetY == 0)
+            {
+                return changed;
+            }
+
+            float contentWidth = MeasureContentWidth(element, vpW, vpH);
+            float contentHeight = MeasureContentHeight(element, vpW, vpH);
+            float maxScrollX = Math.Max(0, contentWidth - element.LayoutWidth);
+            float maxScrollY = Math.Max(0, contentHeight - element.LayoutHeight);
+
+            float clampedX = maxScrollX <= 0 ? 0 : Math.Clamp(element.ScrollOffsetX, 0, maxScrollX);
+            float clampedY = maxScrollY <= 0 ? 0 : Math.Clamp(element.ScrollOffsetY, 0, maxScrollY);
+
+            if (!clampedX.Equals(element.ScrollOffsetX))
+            {
+                element.ScrollOffsetX = clampedX;
+                changed = true;
+            }
+
+            if (!clampedY.Equals(element.ScrollOffsetY))
+            {
+                element.ScrollOffsetY = clampedY;
+                changed = true;
+            }
+
+            return changed;
         }
 
         private static void LayoutChildren(Win32Element container, float vpW, float vpH)

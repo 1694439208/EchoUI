@@ -125,7 +125,7 @@ Props 是组件或元素的输入契约。
 所有标准属性必须遵守以下默认值规则：
 
 - 未设置的属性必须按本文档定义的默认语义处理；渲染器不得引入未记录的隐藏默认值。
-- 本文档允许“平台默认”的纯视觉属性时，具体渲染器必须在自己的实现文档中声明映射；布局、尺寸、事件和状态语义不得使用未声明的平台默认值。
+- 本文档允许“平台默认”的纯视觉属性时，具体渲染器必须在自己的实现文档中声明至少以下映射：Text 默认字体/字号/字重/文本色、宿主或根表面背景色、Input 默认背景色/文本色/边框色/焦点边框色/内边距；布局、尺寸、事件和状态语义不得使用未声明的平台默认值。
 - 属性从非默认值变回未设置或默认值时，渲染器必须清除或重置之前写入的平台状态，避免旧样式残留。
 - `Dimension` 未设置表示 `Auto`。普通布局元素的 `Auto` 主轴尺寸以内容固有尺寸为基准；百分比尺寸在父尺寸不可计算时不得参与固有尺寸测量。
 - `Spacing` 未设置表示四边均为 `0`。
@@ -346,11 +346,11 @@ Input 是 EchoUI V1 的标准单行文本输入元素。
 |---|---|---|
 | Value | string | 空字符串。 |
 | OnValueChanged | callback<string> | 文本变化回调。 |
-| BackgroundColor | Color | 平台默认。 |
-| TextColor | Color | 平台默认。 |
-| BorderColor | Color | 平台默认。 |
-| FocusedBorderColor | Color | 平台默认。 |
-| Padding | Spacing | 平台默认。 |
+| BackgroundColor | Color | White。 |
+| TextColor | Color | Black。 |
+| BorderColor | Color | Transparent。 |
+| FocusedBorderColor | Color | Transparent。 |
+| Padding | Spacing | 0。 |
 
 标准要求：
 
@@ -918,6 +918,30 @@ ListViewport
 - 改变标准组件事件回调语义。
 - 因不支持某一可选视觉能力而破坏基础布局。
 - 把平台专有属性泄漏为标准组件的必需输入。
+
+### 12.1 官方渲染器默认视觉基线
+
+以下表格描述当前官方 Web / Win32 renderer 的默认视觉映射。除“强约束”项外，新后端可以采用不同外观，但必须在实现文档中声明。
+
+| 项目 | Web 官方 renderer | Win32 官方 renderer | 约束类型 |
+|---|---|---|---|
+| Container 默认背景 / 边框 | Transparent / None / 0 / Transparent / Radius 0 | Transparent / None / 0 / Transparent / Radius 0 | 强约束 |
+| Container 默认 Margin / Padding / Gap | 0 / 0 / 0 | 0 / 0 / 0 | 强约束 |
+| Text 默认字体 | 浏览器 / 宿主默认字体 | `Segoe UI`；疑似 Emoji 文本回退 `Segoe UI Emoji` | 平台差异，可声明 |
+| Text 默认字号 | 浏览器 / 宿主默认字号 | `14px` | 平台差异，可声明 |
+| Text 默认字重 | 浏览器 / 宿主默认字重 | `Regular` | 平台差异，可声明 |
+| Text 默认文本色 | 浏览器 / 宿主当前文本色 | Black | 平台差异，可声明 |
+| 宿主 / 根表面背景 | 由宿主 DOM / CSS 决定，不属于标准元素默认值 | 根画布清空为 White | 平台差异，可声明 |
+| Input 默认背景色 | White | White | 强约束 |
+| Input 默认文本色 | Black | Black | 强约束 |
+| Input 默认边框 / 焦点边框 | None / Transparent；未显式设置颜色时无可见边框 | None / Transparent；未显式设置颜色时无可见边框 | 强约束 |
+| Input 默认 Padding | 0 | 0 | 强约束 |
+
+补充要求：
+
+- 需要稳定跨端外观时，不应依赖 Text 的平台默认字体、字号、字重或文本色，应显式设置对应 Props。
+- `Input` 的默认白底、黑字、无边框、零内边距属于跨端强约束；新后端如不能满足，必须在实现文档中明确声明差异。
+- Web 宿主页面背景不属于 `Container` 或 `Text` 的标准默认值；如果业务需要固定背景，必须由宿主 CSS 或根容器显式设置。
 
 ## 13. 组件设计验收清单
 
