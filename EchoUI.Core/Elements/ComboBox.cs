@@ -107,6 +107,7 @@ namespace EchoUI.Core
                     Container(new ContainerProps
                     {
                         Float = true,
+                        Width = Dimension.Percent(100),
                         Children = [
                             Container(new ContainerProps
                             {

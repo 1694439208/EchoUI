@@ -508,7 +508,8 @@ Container(
 
 - 固定宽度区域设置 `FlexShrink = 0`。
 - 主内容区域设置 `FlexGrow = 1`。
-- 横向多个卡片等比分配时，每个卡片设置相同 `FlexGrow`。
+- `FlexGrow` 不会把基础尺寸隐式改成 0；未设置主轴尺寸时仍按内容固有尺寸作为基础尺寸。
+- 横向多个卡片或表单列需要严格等分时，每个卡片/列同时设置 `Width = Dimension.ZeroPixels` 和相同 `FlexGrow`。
 - 内容可能过宽时设置 `FlexShrink = 1`，避免溢出。
 
 ### 5.5 滚动与溢出
@@ -534,8 +535,9 @@ Container(
 `Float = true` 在 Web 中会强制设置：
 
 ```text
-height: 0
-min-height: 0
+height: 0 // 当 Height 未显式设置时
+min-height: 0 // 当 MinHeight 未显式设置时
+width: 100% // 当 Width 未显式设置时
 overflow: visible
 z-index: 1000
 ```
@@ -543,6 +545,8 @@ z-index: 1000
 标准要求：
 
 - 下拉、弹出层、悬浮菜单使用 `Float`。
+- 浮动层不占据普通布局空间，不应推动同级普通元素。
+- 浮动层未设置 `Width` 时默认跟随父容器内容宽度；标准组件建议显式设置 `Width = Dimension.Percent(100)`。
 - 浮动层内容应再包一层真实尺寸容器。
 - 浮动层父容器应允许 `Overflow.Visible`。
 - 不要用 `Float` 做普通页面布局。
@@ -556,6 +560,7 @@ Container(
         Trigger(),
         Container(
             Float: true,
+            Width: Dimension.Percent(100),
             Children: [
                 Container(
                     Width: Dimension.Percent(100),

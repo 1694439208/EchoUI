@@ -444,6 +444,7 @@ namespace EchoUI.Demo
                             // Left Column
                             Container(new ContainerProps
                             {
+                                Width = Dimension.ZeroPixels,
                                 FlexGrow = 1,
                                 FlexShrink = 1,
                                 Gap = 15,
@@ -479,6 +480,7 @@ namespace EchoUI.Demo
                             // Right Column
                             Container(new ContainerProps
                             {
+                                Width = Dimension.ZeroPixels,
                                 FlexGrow = 1,
                                 FlexShrink = 1,
                                 Gap = 15,

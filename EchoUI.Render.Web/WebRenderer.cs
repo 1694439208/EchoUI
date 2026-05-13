@@ -93,8 +93,12 @@ namespace EchoUI.Render.Web
                     domPatch.Styles["overflow"] = (p.Overflow.HasValue) ? ToCss(p.Overflow) : null;
                     if (p.Float)
                     {
-                        domPatch.Styles["height"] = "0";
-                        domPatch.Styles["min-height"] = "0";
+                        if (!p.Height.HasValue)
+                            domPatch.Styles["height"] = "0";
+                        if (!p.MinHeight.HasValue)
+                            domPatch.Styles["min-height"] = "0";
+                        if (!p.Width.HasValue)
+                            domPatch.Styles["width"] = "100%";
                         domPatch.Styles["overflow"] = "visible";
                         domPatch.Styles["z-index"] = "1000";
                     }
@@ -129,7 +133,7 @@ namespace EchoUI.Render.Web
         {
             switch (props)
             {
-                case ContainerProps:
+                case ContainerProps containerProps:
                     switch (propName)
                     {
                         // --- Layout ---
@@ -145,8 +149,12 @@ namespace EchoUI.Render.Web
                         case nameof(ContainerProps.Float):
                             if (propValue is true)
                             {
-                                domPatch.SetStyle("height", "0");
-                                domPatch.SetStyle("min-height", "0");
+                                if (!containerProps.Height.HasValue)
+                                    domPatch.SetStyle("height", "0");
+                                if (!containerProps.MinHeight.HasValue)
+                                    domPatch.SetStyle("min-height", "0");
+                                if (!containerProps.Width.HasValue)
+                                    domPatch.SetStyle("width", "100%");
                                 domPatch.SetStyle("overflow", "visible");
                                 domPatch.SetStyle("z-index", "1000");
                             }
@@ -156,8 +164,12 @@ namespace EchoUI.Render.Web
                                 // In a real reconciler we might need to re-apply Height/MinHeight/Overflow from other props if they exist.
                                 // For now, assuming Full Re-render or just standard patch flow.
                                 // If Float goes false, we likely need to clear these forced styles.
-                                domPatch.SetStyle("height", null);
-                                domPatch.SetStyle("min-height", null);
+                                if (!containerProps.Height.HasValue)
+                                    domPatch.SetStyle("height", null);
+                                if (!containerProps.MinHeight.HasValue)
+                                    domPatch.SetStyle("min-height", null);
+                                if (!containerProps.Width.HasValue)
+                                    domPatch.SetStyle("width", null);
                                 domPatch.SetStyle("overflow", null); 
                                 domPatch.SetStyle("z-index", null);
                             }
