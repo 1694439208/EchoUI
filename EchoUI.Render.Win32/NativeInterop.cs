@@ -36,6 +36,8 @@ namespace EchoUI.Render.Win32
         public const uint WM_ECHOUI_UPDATE = WM_APP + 1;
 
         // --- Edit 控件通知 ---
+        public const int EN_SETFOCUS = 0x0100;
+        public const int EN_KILLFOCUS = 0x0200;
         public const int EN_CHANGE = 0x0300;
         public const uint WM_CTLCOLOREDIT = 0x0133;
         public const uint WM_SETFONT = 0x0030;
@@ -65,7 +67,11 @@ namespace EchoUI.Render.Win32
         public const int COLOR_WINDOW = 5;
 
         // --- ShowWindow ---
+        public const int SW_HIDE = 0;
         public const int SW_SHOW = 5;
+
+        // --- Virtual keys ---
+        public const int VK_SHIFT = 0x10;
 
         // --- TrackMouseEvent ---
         public const uint TME_LEAVE = 0x00000002;
@@ -210,6 +216,12 @@ namespace EchoUI.Render.Win32
         public static extern bool SetFocus(nint hWnd);
 
         [DllImport("user32.dll")]
+        public static extern nint GetFocus();
+
+        [DllImport("user32.dll")]
+        public static extern short GetKeyState(int nVirtKey);
+
+        [DllImport("user32.dll")]
         public static extern int GetWindowText(nint hWnd, [Out] char[] lpString, int nMaxCount);
 
         [DllImport("user32.dll")]
@@ -232,6 +244,9 @@ namespace EchoUI.Render.Win32
 
         [DllImport("user32.dll")]
         public static extern bool AdjustWindowRectEx(ref RECT lpRect, uint dwStyle, bool bMenu, uint dwExStyle);
+
+        [DllImport("user32.dll")]
+        public static extern int SetWindowRgn(nint hWnd, nint hRgn, bool bRedraw);
 
         // --- Kernel32.dll ---
         [DllImport("kernel32.dll")]
@@ -258,6 +273,9 @@ namespace EchoUI.Render.Win32
 
         [DllImport("gdi32.dll")]
         public static extern nint CreateSolidBrush(int crColor);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint CreateRectRgn(int x1, int y1, int x2, int y2);
 
         [DllImport("gdi32.dll")]
         public static extern bool DeleteObject(nint hObject);

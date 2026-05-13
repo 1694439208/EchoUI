@@ -67,11 +67,12 @@ namespace EchoUI.Render.Win32
         {
             var bounds = element.GetAbsoluteBounds();
 
-            // Float 元素可能超出父容器边界，需要特殊处理
+            // Overflow.Visible / Float 元素的子节点可能超出自身边界
             bool isInBounds = x >= bounds.X && x <= bounds.Right && y >= bounds.Y && y <= bounds.Bottom;
+            bool canHitOutsideBounds = element.Overflow == Overflow.Visible || element.Float;
 
             // 如果元素有 Overflow 裁剪，超出部分不可点击
-            if (!isInBounds && element.Overflow != Overflow.Visible)
+            if (!isInBounds && !canHitOutsideBounds)
                 return null;
 
             // 先检查 Float 子元素（它们在最上层，可能超出父容器边界）
@@ -83,10 +84,6 @@ namespace EchoUI.Render.Win32
                 var hit = HitTestRecursive(child, x, y);
                 if (hit != null) return hit;
             }
-
-            // 非 Float 子元素需要在父容器边界内
-            if (!isInBounds)
-                return null;
 
             // 从后往前遍历非 Float 子元素
             for (int i = element.Children.Count - 1; i >= 0; i--)
@@ -101,10 +98,19 @@ namespace EchoUI.Render.Win32
                 if (hit != null) return hit;
             }
 
+            if (!isInBounds)
+                return null;
+
             if (HasEventHandler(element))
                 return element;
 
+            if (element.ElementType == ElementCoreName.Input)
+                return element;
+
             if (element.ElementType == ElementCoreName.Container)
+                return element;
+
+            if (element.ElementType == ElementCoreName.Text && !element.MouseThrough)
                 return element;
 
             return null;
@@ -165,6 +171,9 @@ namespace EchoUI.Render.Win32
             if (hit != null)
             {
                 _focusedElement = hit;
+                if (hit.ElementType == ElementCoreName.Input && hit.EditHwnd != 0 && NativeInterop.IsWindow(hit.EditHwnd))
+                    NativeInterop.SetFocus(hit.EditHwnd);
+
                 var downTarget = FindHandler(hit, e => e.OnMouseDown != null);
                 downTarget?.OnMouseDown?.Invoke();
                 _renderer.RequestRepaint();
@@ -206,11 +215,22 @@ namespace EchoUI.Render.Win32
 
             if (scrollTarget != null)
             {
+                float contentWidth = FlexLayout.MeasureContentWidth(scrollTarget, vpW, vpH);
                 float contentHeight = FlexLayout.MeasureContentHeight(scrollTarget, vpW, vpH);
-                float maxScroll = Math.Max(0, contentHeight - scrollTarget.LayoutHeight);
+                float maxScrollX = Math.Max(0, contentWidth - scrollTarget.LayoutWidth);
+                float maxScrollY = Math.Max(0, contentHeight - scrollTarget.LayoutHeight);
+                bool scrollHorizontal = (NativeInterop.GetKeyState(NativeInterop.VK_SHIFT) & 0x8000) != 0 || maxScrollY <= 0;
 
-                scrollTarget.ScrollOffsetY -= delta * 0.3f;
-                scrollTarget.ScrollOffsetY = Math.Clamp(scrollTarget.ScrollOffsetY, 0, maxScroll);
+                if (scrollHorizontal && maxScrollX > 0)
+                {
+                    scrollTarget.ScrollOffsetX -= delta * 0.3f;
+                    scrollTarget.ScrollOffsetX = Math.Clamp(scrollTarget.ScrollOffsetX, 0, maxScrollX);
+                }
+                else if (maxScrollY > 0)
+                {
+                    scrollTarget.ScrollOffsetY -= delta * 0.3f;
+                    scrollTarget.ScrollOffsetY = Math.Clamp(scrollTarget.ScrollOffsetY, 0, maxScrollY);
+                }
 
                 _renderer.RequestRelayout();
             }

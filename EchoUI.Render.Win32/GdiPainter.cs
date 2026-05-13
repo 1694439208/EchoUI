@@ -49,11 +49,12 @@ namespace EchoUI.Render.Win32
 
             var bounds = element.GetAbsoluteBounds();
 
-            // 如果元素完全在裁剪区域外，跳过
+            // 如果元素完全在裁剪区域外且子元素不会外溢可见，跳过
             if (bounds.Right < clipRect.Left || bounds.Left > clipRect.Right ||
                 bounds.Bottom < clipRect.Top || bounds.Top > clipRect.Bottom)
             {
-                return;
+                if (element.Overflow != Overflow.Visible || element.Children.Count == 0)
+                    return;
             }
 
             switch (element.ElementType)
@@ -80,10 +81,10 @@ namespace EchoUI.Render.Win32
 
         private static void PaintContainer(Graphics g, Win32Element element, RectangleF bounds, RectangleF clipRect, IReadOnlyCollection<Win32Element>? skippedElements)
         {
-            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+            bool hasDrawableBounds = bounds.Width > 0 && bounds.Height > 0;
 
             // 绘制背景
-            if (element.BackgroundColor.HasValue && element.BackgroundColor.Value.A > 0)
+            if (hasDrawableBounds && element.BackgroundColor.HasValue && element.BackgroundColor.Value.A > 0)
             {
                 var color = ToGdiColor(element.BackgroundColor.Value);
                 using var brush = new SolidBrush(color);
@@ -100,7 +101,7 @@ namespace EchoUI.Render.Win32
             }
 
             // 绘制边框
-            if (element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
+            if (hasDrawableBounds && element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
             {
                 var borderColor = ToGdiColor(element.BorderColor.Value);
                 var dashStyle = element.BorderStyle switch
@@ -175,10 +176,8 @@ namespace EchoUI.Render.Win32
             if (element.FontWeight != null)
             {
                 var weight = element.FontWeight.ToLower();
-                if (weight is "bold" or "700" or "800" or "900")
+                if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
                     fontStyle = FontStyle.Bold;
-                else if (weight is "semibold" or "600" or "500")
-                    fontStyle = FontStyle.Bold; // GDI+ 没有 SemiBold，用 Bold 近似
             }
 
             var fontFamily = element.FontFamily;
@@ -235,9 +234,12 @@ namespace EchoUI.Render.Win32
             }
 
             // 绘制边框
-            if (element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
+            var effectiveBorderColor = element.IsFocused && element.FocusedBorderColor.HasValue
+                ? element.FocusedBorderColor
+                : element.BorderColor;
+            if (element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && effectiveBorderColor.HasValue)
             {
-                var borderColor = ToGdiColor(element.BorderColor.Value);
+                var borderColor = ToGdiColor(effectiveBorderColor.Value);
                 var dashStyle = element.BorderStyle switch
                 {
                     Core.BorderStyle.Dashed => System.Drawing.Drawing2D.DashStyle.Dash,
@@ -261,30 +263,39 @@ namespace EchoUI.Render.Win32
 
         private static void PaintScrollbar(Graphics g, Win32Element element, RectangleF bounds)
         {
-            float contentHeight = FlexLayout.MeasureContentHeight(element,
-                bounds.Width, bounds.Height);
+            float contentWidth = FlexLayout.MeasureContentWidth(element, bounds.Width, bounds.Height);
+            float contentHeight = FlexLayout.MeasureContentHeight(element, bounds.Width, bounds.Height);
+            bool showVertical = contentHeight > element.LayoutHeight;
+            bool showHorizontal = contentWidth > element.LayoutWidth;
 
-            if (contentHeight <= element.LayoutHeight) return;
+            if (!showVertical && !showHorizontal) return;
 
-            float scrollbarWidth = 6;
-            float trackHeight = bounds.Height;
-            float thumbHeight = Math.Max(20, trackHeight * (element.LayoutHeight / contentHeight));
-            float maxScroll = contentHeight - element.LayoutHeight;
-            float thumbY = bounds.Y + (element.ScrollOffsetY / maxScroll) * (trackHeight - thumbHeight);
-
-            // 滚动条轨道
-            var trackRect = new RectangleF(
-                bounds.Right - scrollbarWidth - 2, bounds.Y,
-                scrollbarWidth, trackHeight);
-
-            // 滚动条滑块
-            var thumbRect = new RectangleF(
-                trackRect.X, thumbY,
-                scrollbarWidth, thumbHeight);
-
+            const float scrollbarSize = 6;
             using var thumbBrush = new SolidBrush(System.Drawing.Color.FromArgb(128, 128, 128, 128));
-            using var thumbPath = CreateRoundedRect(thumbRect, scrollbarWidth / 2);
-            g.FillPath(thumbBrush, thumbPath);
+
+            if (showVertical)
+            {
+                float trackHeight = bounds.Height - (showHorizontal ? scrollbarSize + 2 : 0);
+                float thumbHeight = Math.Max(20, trackHeight * (element.LayoutHeight / contentHeight));
+                float maxScroll = contentHeight - element.LayoutHeight;
+                float thumbY = bounds.Y + (element.ScrollOffsetY / maxScroll) * (trackHeight - thumbHeight);
+                var thumbRect = new RectangleF(bounds.Right - scrollbarSize - 2, thumbY, scrollbarSize, thumbHeight);
+
+                using var thumbPath = CreateRoundedRect(thumbRect, scrollbarSize / 2);
+                g.FillPath(thumbBrush, thumbPath);
+            }
+
+            if (showHorizontal)
+            {
+                float trackWidth = bounds.Width - (showVertical ? scrollbarSize + 2 : 0);
+                float thumbWidth = Math.Max(20, trackWidth * (element.LayoutWidth / contentWidth));
+                float maxScroll = contentWidth - element.LayoutWidth;
+                float thumbX = bounds.X + (element.ScrollOffsetX / maxScroll) * (trackWidth - thumbWidth);
+                var thumbRect = new RectangleF(thumbX, bounds.Bottom - scrollbarSize - 2, thumbWidth, scrollbarSize);
+
+                using var thumbPath = CreateRoundedRect(thumbRect, scrollbarSize / 2);
+                g.FillPath(thumbBrush, thumbPath);
+            }
         }
 
         private static void PaintImage(Graphics g, Win32Element element, RectangleF bounds)

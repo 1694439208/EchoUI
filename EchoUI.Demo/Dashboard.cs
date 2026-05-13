@@ -31,6 +31,7 @@ namespace EchoUI.Demo
                         Padding = new Spacing(Dimension.Pixels(30)),
                         Direction = LayoutDirection.Vertical,
                         Gap = 30,
+                        AlignItems = AlignItems.Stretch,
                         Overflow = Overflow.Auto, // Auto allows scrolling only when needed
                         Children =
                         [
@@ -128,8 +129,10 @@ namespace EchoUI.Demo
 
             return Container(new ContainerProps
             {
+                Width = Dimension.Percent(100),
                 Direction = LayoutDirection.Vertical,
                 Gap = 30,
+                AlignItems = AlignItems.Stretch,
                 Children = 
                 [
                     Header("Dashboard Overview", "Welcome back, Administrator."),
@@ -151,8 +154,10 @@ namespace EchoUI.Demo
                     // Recent Activity & Quick Actions
                     Container(new ContainerProps 
                     {
+                        Width = Dimension.Percent(100),
                         Direction = LayoutDirection.Horizontal,
                         Gap = 20,
+                        AlignItems = AlignItems.Stretch,
                         Children = [
                             // Main Form / Table area
                             Container(new ContainerProps 
@@ -160,6 +165,7 @@ namespace EchoUI.Demo
                                 FlexGrow = 2, 
                                 FlexShrink = 1,
                                 Gap = 20,
+                                AlignItems = AlignItems.Stretch,
                                 Children = 
                                 [
                                     UserForm(newUser => 
@@ -171,18 +177,22 @@ namespace EchoUI.Demo
                                     // User List
                                     Container(new ContainerProps
                                     {
+                                        Width = Dimension.Percent(100),
                                         BackgroundColor = Color.White,
                                         Padding = new Spacing(Dimension.Pixels(24)),
                                         BorderRadius = 8,
                                         BorderWidth = 1,
                                         BorderColor = Color.FromHex("#e5e7eb"),
                                         Gap = 15,
+                                        AlignItems = AlignItems.Stretch,
                                         Children = 
                                         [
                                             Text(new TextProps { Text = "Recent Users", FontSize = 18, Color = Color.Black }),
                                             Container(new ContainerProps
                                             {
+                                                Width = Dimension.Percent(100),
                                                 Gap = 10,
+                                                AlignItems = AlignItems.Stretch,
                                                 Children = users.Value.Select(u => UserListItem(u)).ToList()
                                             })
                                         ]
@@ -201,6 +211,7 @@ namespace EchoUI.Demo
                                 BorderWidth = 1,
                                 BorderColor = Color.FromHex("#e5e7eb"),
                                 Gap = 15,
+                                AlignItems = AlignItems.Stretch,
                                 Children = [
                                     Text(new TextProps { Text = "System Status", FontSize = 18, Color = Color.Black }),
                                     StatusItem("Database", "Online", Color.FromHex("#10b981")),
@@ -219,8 +230,10 @@ namespace EchoUI.Demo
         {
             return Container(new ContainerProps
             {
+                Width = Dimension.Percent(100),
                 Direction = LayoutDirection.Horizontal,
                 JustifyContent = JustifyContent.SpaceBetween,
+                AlignItems = AlignItems.Center,
                 Padding = new Spacing(Dimension.Pixels(12)),
                 BackgroundColor = Color.FromHex("#f9fafb"),
                 BorderRadius = 6,
@@ -261,8 +274,10 @@ namespace EchoUI.Demo
         {
              return Container(new ContainerProps
             {
+                Width = Dimension.Percent(100),
                 Direction = LayoutDirection.Vertical,
                 Gap = 30,
+                AlignItems = AlignItems.Stretch,
                 Children = 
                 [
                     Header("Analytics", "View system performance and user growth."),
@@ -286,8 +301,10 @@ namespace EchoUI.Demo
         {
              return Container(new ContainerProps
             {
+                Width = Dimension.Percent(100),
                 Direction = LayoutDirection.Vertical,
                 Gap = 30,
+                AlignItems = AlignItems.Stretch,
                 Children = 
                 [
                     Header("Settings", "Manage application configurations."),
@@ -301,8 +318,10 @@ namespace EchoUI.Demo
         {
              return Container(new ContainerProps
             {
+                Width = Dimension.Percent(100),
                 Direction = LayoutDirection.Vertical,
                 Gap = 30,
+                AlignItems = AlignItems.Stretch,
                 Children = 
                 [
                     Header("Documentation", "Learn how to use EchoUI."),
@@ -350,8 +369,10 @@ namespace EchoUI.Demo
                 [
                     Container(new ContainerProps 
                     { 
+                        Width = Dimension.Percent(100),
                         Direction = LayoutDirection.Horizontal, 
                         JustifyContent = JustifyContent.SpaceBetween,
+                        AlignItems = AlignItems.Center,
                         Children = [
                             Text(new TextProps { Text = title, Color = Color.FromHex("#6b7280"), FontSize = 14 }),
                             Container(new ContainerProps { Width = Dimension.Pixels(8), Height = Dimension.Pixels(8), BorderRadius = 4, BackgroundColor = accentColor })
@@ -371,6 +392,7 @@ namespace EchoUI.Demo
             {
                 Direction = LayoutDirection.Horizontal,
                 JustifyContent = JustifyContent.SpaceBetween,
+                AlignItems = AlignItems.Center,
                 Width = Dimension.Percent(100),
                 Children = [
                     Text(new TextProps { Text = name, Color = Color.FromHex("#4b5563"), FontSize = 14 }),
@@ -405,6 +427,7 @@ namespace EchoUI.Demo
                 BorderWidth = 1,
                 BorderColor = Color.FromHex("#e5e7eb"),
                 Gap = 20,
+                AlignItems = AlignItems.Stretch,
                 Children =
                 [
                     Text(new TextProps { Text = "Add New User", FontSize = 18, Color = Color.Black }),
@@ -412,8 +435,10 @@ namespace EchoUI.Demo
                     // Grid-like layout for form
                     Container(new ContainerProps
                     {
+                        Width = Dimension.Percent(100),
                         Direction = LayoutDirection.Horizontal,
                         Gap = 20,
+                        AlignItems = AlignItems.Stretch,
                         Children =
                         [
                             // Left Column
@@ -422,6 +447,7 @@ namespace EchoUI.Demo
                                 FlexGrow = 1,
                                 FlexShrink = 1,
                                 Gap = 15,
+                                AlignItems = AlignItems.Stretch,
                                 Children = 
                                 [
                                     Label("Username"),
@@ -456,6 +482,7 @@ namespace EchoUI.Demo
                                 FlexGrow = 1,
                                 FlexShrink = 1,
                                 Gap = 15,
+                                AlignItems = AlignItems.Stretch,
                                 Children = 
                                 [
                                     Label("Status"),
@@ -487,6 +514,7 @@ namespace EchoUI.Demo
 
                     Container(new ContainerProps
                     {
+                        Width = Dimension.Percent(100),
                         Direction = LayoutDirection.Horizontal,
                         JustifyContent = JustifyContent.End,
                         Children = 

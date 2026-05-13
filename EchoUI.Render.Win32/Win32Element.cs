@@ -51,7 +51,7 @@ namespace EchoUI.Render.Win32
         // --- Flex 布局 ---
         public LayoutDirection Direction { get; set; } = LayoutDirection.Vertical;
         public JustifyContent JustifyContent { get; set; } = JustifyContent.Start;
-        public AlignItems AlignItems { get; set; } = AlignItems.Stretch;
+        public AlignItems AlignItems { get; set; } = AlignItems.Start;
         public float FlexGrow { get; set; }
         public float FlexShrink { get; set; }
         public float Gap { get; set; }
@@ -61,6 +61,7 @@ namespace EchoUI.Render.Win32
         // --- 外观 ---
         public Core.Color? BackgroundColor { get; set; }
         public Core.Color? BorderColor { get; set; }
+        public Core.Color? FocusedBorderColor { get; set; }
         public BorderStyle BorderStyle { get; set; } = BorderStyle.None;
         public float BorderWidth { get; set; }
         public float BorderRadius { get; set; }
@@ -91,10 +92,12 @@ namespace EchoUI.Render.Win32
         public Action<string>? OnValueChanged { get; set; }
 
         // --- 滚动 ---
+        public float ScrollOffsetX { get; set; }
         public float ScrollOffsetY { get; set; }
 
         // --- 状态 ---
         public bool IsHovered { get; set; }
+        public bool IsFocused { get; set; }
 
         public Win32Element(string elementType)
         {

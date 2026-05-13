@@ -47,6 +47,8 @@ namespace EchoUI.Render.Win32
             // Input 元素创建原生 Edit 控件
             if (type == ElementCoreName.Input)
             {
+                element.Width = Dimension.Percent(100);
+                element.Height = Dimension.Percent(100);
                 CreateEditControl(element);
             }
 
@@ -72,11 +74,13 @@ namespace EchoUI.Render.Win32
             {
                 case ContainerProps p:
                     element.Direction = p.Direction ?? LayoutDirection.Vertical;
-                    element.FlexShrink = p.FlexShrink ?? 1;
+                    element.JustifyContent = p.JustifyContent ?? JustifyContent.Start;
+                    element.AlignItems = p.AlignItems ?? AlignItems.Start;
+                    element.FlexShrink = p.FlexShrink ?? 0;
                     element.FlexGrow = p.FlexGrow ?? 0;
                     break;
-                case TextProps:
-                    element.MouseThrough = true;
+                case TextProps p:
+                    element.MouseThrough = p.MouseThrough;
                     break;
             }
 
@@ -210,7 +214,7 @@ namespace EchoUI.Render.Win32
                     element.JustifyContent = propValue is JustifyContent jc ? jc : JustifyContent.Start;
                     break;
                 case nameof(ContainerProps.AlignItems):
-                    element.AlignItems = propValue is AlignItems ai ? ai : AlignItems.Stretch;
+                    element.AlignItems = propValue is AlignItems ai ? ai : AlignItems.Start;
                     break;
                 case nameof(ContainerProps.FlexGrow):
                     element.FlexGrow = propValue is float fg ? fg : 0;
@@ -282,7 +286,40 @@ namespace EchoUI.Render.Win32
                 case nameof(InputProps.Value):
                     element.InputValue = propValue as string;
                     break;
+                case nameof(InputProps.BackgroundColor):
+                    element.BackgroundColor = propValue as Core.Color?;
+                    break;
+                case nameof(InputProps.TextColor):
+                    element.TextColor = propValue as Core.Color?;
+                    break;
+                case nameof(InputProps.BorderColor):
+                    element.BorderColor = propValue as Core.Color?;
+                    ApplyInputBorderDefaults(element);
+                    break;
+                case nameof(InputProps.FocusedBorderColor):
+                    element.FocusedBorderColor = propValue as Core.Color?;
+                    ApplyInputBorderDefaults(element);
+                    break;
+                case nameof(InputProps.Padding):
+                    element.Padding = propValue as Spacing?;
+                    break;
                 // OnValueChanged 由 UpdateEventHandlers 处理
+            }
+        }
+
+        private void ApplyInputBorderDefaults(Win32Element element)
+        {
+            if (element.BorderColor.HasValue || element.FocusedBorderColor.HasValue)
+            {
+                if (element.BorderStyle == Core.BorderStyle.None)
+                    element.BorderStyle = Core.BorderStyle.Solid;
+                if (element.BorderWidth <= 0)
+                    element.BorderWidth = 1;
+            }
+            else
+            {
+                element.BorderStyle = Core.BorderStyle.None;
+                element.BorderWidth = 0;
             }
         }
 
@@ -330,17 +367,64 @@ namespace EchoUI.Render.Win32
                 case InputProps ip:
                     element.OnValueChanged = ip.OnValueChanged;
                     break;
-                case NativeProps nativeProps when nativeProps.Properties != null:
+                case NativeProps nativeProps:
+                    ClearNativeEventHandlers(element);
+                    if (nativeProps.Properties == null) break;
+
                     foreach (var item in nativeProps.Properties.Value.Data)
                     {
-                        if (item.Value is Action<MouseButton> clickHandler)
-                            element.OnClick = clickHandler;
-                        else if (item.Value is Action action)
-                        {
-                            // 简单映射
-                            if (item.Key == "click") element.OnClick = _ => action();
-                        }
+                        ApplyNativeEventHandler(element, item.Key, item.Value);
                     }
+                    break;
+            }
+        }
+
+        private static void ClearNativeEventHandlers(Win32Element element)
+        {
+            element.OnClick = null;
+            element.OnMouseMove = null;
+            element.OnMouseEnter = null;
+            element.OnMouseLeave = null;
+            element.OnMouseDown = null;
+            element.OnMouseUp = null;
+            element.OnKeyDown = null;
+            element.OnKeyUp = null;
+            element.OnValueChanged = null;
+        }
+
+        private static void ApplyNativeEventHandler(Win32Element element, string eventName, object? value)
+        {
+            switch (eventName)
+            {
+                case "click" when value is Action<MouseButton> clickHandler:
+                    element.OnClick = clickHandler;
+                    break;
+                case "click" when value is Action clickAction:
+                    element.OnClick = _ => clickAction();
+                    break;
+                case "mousemove" when value is Action<Core.Point> mouseMoveHandler:
+                    element.OnMouseMove = mouseMoveHandler;
+                    break;
+                case "mouseenter" when value is Action mouseEnterHandler:
+                    element.OnMouseEnter = mouseEnterHandler;
+                    break;
+                case "mouseleave" when value is Action mouseLeaveHandler:
+                    element.OnMouseLeave = mouseLeaveHandler;
+                    break;
+                case "mousedown" when value is Action mouseDownHandler:
+                    element.OnMouseDown = mouseDownHandler;
+                    break;
+                case "mouseup" when value is Action mouseUpHandler:
+                    element.OnMouseUp = mouseUpHandler;
+                    break;
+                case "keydown" when value is Action<int> keyDownHandler:
+                    element.OnKeyDown = keyDownHandler;
+                    break;
+                case "keyup" when value is Action<int> keyUpHandler:
+                    element.OnKeyUp = keyUpHandler;
+                    break;
+                case "input" when value is Action<string> inputHandler:
+                    element.OnValueChanged = inputHandler;
                     break;
             }
         }
@@ -399,9 +483,7 @@ namespace EchoUI.Render.Win32
                 element.NativeFontHandle = 0;
             }
             
-            var fontStyle = FontStyle.Regular;
-            if (element.FontWeight != null && (element.FontWeight == "bold" || element.FontWeight == "700"))
-                fontStyle = FontStyle.Bold;
+            var fontStyle = ResolveFontStyle(element.FontWeight);
 
             using (var font = new Font(element.FontFamily ?? "Segoe UI", element.FontSize > 0 ? element.FontSize : 14, fontStyle, GraphicsUnit.Pixel))
             {
@@ -442,6 +524,15 @@ namespace EchoUI.Render.Win32
 
                 element.InputValue = text;
                 element.OnValueChanged?.Invoke(text);
+            }
+        }
+
+        internal void HandleEditFocusChange(nint editHwnd, bool isFocused)
+        {
+            if (_editElements.TryGetValue(editHwnd, out var element))
+            {
+                element.IsFocused = isFocused;
+                RequestRepaint();
             }
         }
 
@@ -560,31 +651,120 @@ namespace EchoUI.Render.Win32
         {
             if (element.EditHwnd != 0)
             {
-                // 计算内容区域（减去 Padding 和 Border）
                 var padding = ResolvePadding(element.Padding, element.LayoutWidth, vpW, vpH);
-                float border = element.BorderWidth;
-                
-                int x = (int)(element.AbsoluteX + padding.Left + border);
-                int y = (int)(element.AbsoluteY + padding.Top + border);
-                int w = (int)(element.LayoutWidth - padding.Left - padding.Right - border * 2);
-                int h = (int)(element.LayoutHeight - padding.Top - padding.Bottom - border * 2);
-                
-                if (w < 0) w = 0;
-                if (h < 0) h = 0;
+                float border = GetBorderInset(element);
 
-                NativeInterop.MoveWindow(
-                    element.EditHwnd,
-                    x,
-                    y,
-                    w,
-                    h,
-                    true);
+                float contentX = element.AbsoluteX + padding.Left + border;
+                float contentY = element.AbsoluteY + padding.Top + border;
+                float contentW = Math.Max(0, element.LayoutWidth - padding.Left - padding.Right - border * 2);
+                float contentH = Math.Max(0, element.LayoutHeight - padding.Top - padding.Bottom - border * 2);
+                float editH = Math.Min(contentH, GetEditPreferredHeight(element));
+                float editY = contentY + Math.Max(0, (contentH - editH) / 2f);
+
+                int x = (int)Math.Floor(contentX);
+                int y = (int)Math.Round(editY, MidpointRounding.AwayFromZero);
+                int w = (int)Math.Ceiling(contentW);
+                int h = Math.Max(1, (int)Math.Round(editH, MidpointRounding.AwayFromZero));
+
+                var editRect = new RectangleF(x, y, w, h);
+                var clipRect = GetEditClipRect(element, vpW, vpH);
+                var visibleRect = RectangleF.Intersect(editRect, clipRect);
+
+                if (visibleRect.Width <= 0 || visibleRect.Height <= 0 || w <= 0 || h <= 0)
+                {
+                    NativeInterop.ShowWindow(element.EditHwnd, NativeInterop.SW_HIDE);
+                }
+                else
+                {
+                    NativeInterop.ShowWindow(element.EditHwnd, NativeInterop.SW_SHOW);
+                    NativeInterop.MoveWindow(
+                        element.EditHwnd,
+                        x,
+                        y,
+                        w,
+                        h,
+                        true);
+                    ApplyEditClipRegion(element.EditHwnd, editRect, visibleRect);
+                }
             }
 
             foreach (var child in element.Children)
             {
                 UpdateEditPositions(child, vpW, vpH);
             }
+        }
+
+        private RectangleF GetEditClipRect(Win32Element element, float vpW, float vpH)
+        {
+            var clipRect = new RectangleF(0, 0, vpW, vpH);
+            var current = element.Parent;
+
+            while (current != null)
+            {
+                if (current.Overflow != Overflow.Visible)
+                {
+                    clipRect = RectangleF.Intersect(clipRect, current.GetAbsoluteBounds());
+                }
+
+                if (current.Float)
+                    break;
+
+                current = current.Parent;
+            }
+
+            return clipRect;
+        }
+
+        private static void ApplyEditClipRegion(nint hwnd, RectangleF editRect, RectangleF visibleRect)
+        {
+            if (visibleRect.Left <= editRect.Left && visibleRect.Top <= editRect.Top &&
+                visibleRect.Right >= editRect.Right && visibleRect.Bottom >= editRect.Bottom)
+            {
+                NativeInterop.SetWindowRgn(hwnd, 0, true);
+                return;
+            }
+
+            int left = Math.Max(0, (int)Math.Floor(visibleRect.Left - editRect.Left));
+            int top = Math.Max(0, (int)Math.Floor(visibleRect.Top - editRect.Top));
+            int right = Math.Max(left, (int)Math.Ceiling(visibleRect.Right - editRect.Left));
+            int bottom = Math.Max(top, (int)Math.Ceiling(visibleRect.Bottom - editRect.Top));
+
+            var region = NativeInterop.CreateRectRgn(left, top, right, bottom);
+            if (region == 0) return;
+
+            if (NativeInterop.SetWindowRgn(hwnd, region, true) == 0)
+            {
+                NativeInterop.DeleteObject(region);
+            }
+        }
+
+        private static float GetEditPreferredHeight(Win32Element element)
+        {
+            var fontSize = element.FontSize > 0 ? element.FontSize : 14f;
+            try
+            {
+                using var font = new Font(element.FontFamily ?? "Segoe UI", fontSize, ResolveFontStyle(element.FontWeight), GraphicsUnit.Pixel);
+                return (float)Math.Ceiling(font.GetHeight()) + 1f;
+            }
+            catch
+            {
+                return fontSize + 3f;
+            }
+        }
+
+        private static FontStyle ResolveFontStyle(string? fontWeight)
+        {
+            if (string.IsNullOrEmpty(fontWeight)) return FontStyle.Regular;
+
+            var weight = fontWeight.ToLowerInvariant();
+            return weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900"
+                ? FontStyle.Bold
+                : FontStyle.Regular;
+        }
+
+        private static float GetBorderInset(Win32Element element)
+        {
+            return element.BorderStyle == Core.BorderStyle.None ? 0 : Math.Max(0, element.BorderWidth);
         }
 
         private (float Left, float Top, float Right, float Bottom) ResolvePadding(Spacing? padding, float width, float vpW, float vpH)

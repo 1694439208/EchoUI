@@ -298,9 +298,19 @@ namespace EchoUI.Render.Win32
         private void OnCommand(nint wParam, nint lParam)
         {
             int notificationCode = NativeInterop.HIWORD(wParam);
-            if (notificationCode == NativeInterop.EN_CHANGE && lParam != 0)
+            if (lParam == 0) return;
+
+            if (notificationCode == NativeInterop.EN_CHANGE)
             {
                 _renderer?.HandleEditChange(lParam);
+            }
+            else if (notificationCode == NativeInterop.EN_SETFOCUS)
+            {
+                _renderer?.HandleEditFocusChange(lParam, true);
+            }
+            else if (notificationCode == NativeInterop.EN_KILLFOCUS)
+            {
+                _renderer?.HandleEditFocusChange(lParam, false);
             }
         }
 

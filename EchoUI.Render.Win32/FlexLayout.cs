@@ -54,8 +54,11 @@ namespace EchoUI.Render.Win32
             if (container.Children.Count == 0) return;
 
             var padding = ResolveSpacing(container.Padding, container.LayoutWidth, vpW, vpH);
-            float contentWidth = Math.Max(0, container.LayoutWidth - padding.Left - padding.Right);
-            float contentHeight = Math.Max(0, container.LayoutHeight - padding.Top - padding.Bottom);
+            float border = GetBorderInset(container);
+            float contentX = border + padding.Left;
+            float contentY = border + padding.Top;
+            float contentWidth = Math.Max(0, container.LayoutWidth - border * 2 - padding.Left - padding.Right);
+            float contentHeight = Math.Max(0, container.LayoutHeight - border * 2 - padding.Top - padding.Bottom);
 
             bool isRow = container.Direction == LayoutDirection.Horizontal;
             float mainSize = isRow ? contentWidth : contentHeight;
@@ -108,11 +111,8 @@ namespace EchoUI.Render.Win32
                 }
                 else
                 {
-                    // 只有当 AlignItems 为 Stretch (默认) 时，且子元素没有显式尺寸，才拉伸。
-                    // 注意：Text 元素通常有自己的行高逻辑，但在 Flex 容器中 Stretch 也是合法的，
-                    // 只是绘制时可能不填满。这里我们让布局逻辑符合 Flex 规范。
+                    // 只有当 AlignItems 为 Stretch 时，且子元素没有显式尺寸，才拉伸。
                     // 如果 AlignItems 是 Start/Center/End，则使用固有尺寸。
-                    // 默认 null 视为 Stretch
                     bool isStretch = container.AlignItems == AlignItems.Stretch;
                     
                     if (isStretch)
@@ -260,16 +260,31 @@ namespace EchoUI.Render.Win32
 
                 if (item.IsFloat)
                 {
-                    // Float 元素不占据正常流空间，但自身需要根据内容计算实际尺寸
-                    // 宽度继承父容器内容区宽度
-                    child.LayoutWidth = contentWidth;
-                    // 高度由内容撑开
-                    child.LayoutHeight = MeasureIntrinsicHeight(child, contentWidth, vpW, vpH);
-                    child.LayoutX = padding.Left;
-                    // Float 元素定位在当前 cursor 位置（紧跟上一个正常流元素之后）
-                    child.LayoutY = padding.Top + cursor;
+                    var floatMargin = ResolveSpacing(child.Margin, isRow ? contentWidth : contentHeight, vpW, vpH);
+                    float floatWidth = ResolveSize(child.Width, contentWidth, vpW, vpH)
+                        ?? Math.Max(0, contentWidth - floatMargin.Left - floatMargin.Right);
+                    float floatHeight = ResolveSize(child.Height, contentHeight, vpW, vpH) ?? 0;
+
+                    child.LayoutWidth = floatWidth;
+                    child.LayoutHeight = floatHeight;
+
+                    if (isRow)
+                    {
+                        child.LayoutX = contentX + cursor + floatMargin.Left;
+                        child.LayoutY = contentY + floatMargin.Top;
+                    }
+                    else
+                    {
+                        child.LayoutX = contentX + floatMargin.Left;
+                        child.LayoutY = contentY + cursor + floatMargin.Top;
+                    }
+
                     child.AbsoluteX = container.AbsoluteX + child.LayoutX;
                     child.AbsoluteY = container.AbsoluteY + child.LayoutY;
+                    if (container.ScrollOffsetX != 0)
+                    {
+                        child.AbsoluteX -= container.ScrollOffsetX;
+                    }
                     if (container.ScrollOffsetY != 0)
                     {
                         child.AbsoluteY -= container.ScrollOffsetY;
@@ -305,15 +320,15 @@ namespace EchoUI.Render.Win32
 
                 if (isRow)
                 {
-                    child.LayoutX = padding.Left + mainPos;
-                    child.LayoutY = padding.Top + crossPos;
+                    child.LayoutX = contentX + mainPos;
+                    child.LayoutY = contentY + crossPos;
                     child.LayoutWidth = item.MainBase;
                     child.LayoutHeight = childCross;
                 }
                 else
                 {
-                    child.LayoutX = padding.Left + crossPos;
-                    child.LayoutY = padding.Top + mainPos;
+                    child.LayoutX = contentX + crossPos;
+                    child.LayoutY = contentY + mainPos;
                     child.LayoutWidth = childCross;
                     child.LayoutHeight = item.MainBase;
                 }
@@ -321,6 +336,10 @@ namespace EchoUI.Render.Win32
                 child.AbsoluteX = container.AbsoluteX + child.LayoutX;
                 child.AbsoluteY = container.AbsoluteY + child.LayoutY;
 
+                if (container.ScrollOffsetX != 0)
+                {
+                    child.AbsoluteX -= container.ScrollOffsetX;
+                }
                 if (container.ScrollOffsetY != 0)
                 {
                     child.AbsoluteY -= container.ScrollOffsetY;
@@ -345,31 +364,37 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public static float MeasureContentHeight(Win32Element container, float vpW, float vpH)
         {
-            if (container.Children.Count == 0) return 0;
-
             var padding = ResolveSpacing(container.Padding, container.LayoutWidth, vpW, vpH);
-            bool isRow = container.Direction == LayoutDirection.Horizontal;
-            float total = 0;
-            int count = 0;
+            float border = GetBorderInset(container);
+            float bottom = border + padding.Top;
 
             foreach (var child in container.Children)
             {
                 if (child.Float) continue;
-                if (isRow)
-                {
-                    total = Math.Max(total, child.LayoutHeight);
-                }
-                else
-                {
-                    total += child.LayoutHeight;
-                    count++;
-                }
+                var margin = ResolveSpacing(child.Margin, container.LayoutHeight, vpW, vpH);
+                bottom = Math.Max(bottom, child.LayoutY + child.LayoutHeight + margin.Bottom);
             }
 
-            if (!isRow && count > 1)
-                total += container.Gap * (count - 1);
+            return bottom + padding.Bottom + border;
+        }
 
-            return total + padding.Top + padding.Bottom;
+        /// <summary>
+        /// 计算元素内容的总宽度（用于横向滚动）
+        /// </summary>
+        public static float MeasureContentWidth(Win32Element container, float vpW, float vpH)
+        {
+            var padding = ResolveSpacing(container.Padding, container.LayoutWidth, vpW, vpH);
+            float border = GetBorderInset(container);
+            float right = border + padding.Left;
+
+            foreach (var child in container.Children)
+            {
+                if (child.Float) continue;
+                var margin = ResolveSpacing(child.Margin, container.LayoutWidth, vpW, vpH);
+                right = Math.Max(right, child.LayoutX + child.LayoutWidth + margin.Right);
+            }
+
+            return right + padding.Right + border;
         }
 
         // --- 尺寸解析 ---
@@ -405,12 +430,16 @@ namespace EchoUI.Render.Win32
                 return MeasureTextWidth(element);
 
             if (element.ElementType == ElementCoreName.Input)
-                return 100; // Input 默认宽度
+            {
+                var inputPadding = ResolveSpacing(element.Padding, 0, vpW, vpH);
+                return 100 + inputPadding.Left + inputPadding.Right + GetBorderInset(element) * 2;
+            }
 
             // 容器：递归测量子元素
-            if (element.Children.Count == 0) return 0;
+            if (element.Children.Count == 0) return GetBorderInset(element) * 2;
 
             var padding = ResolveSpacing(element.Padding, 0, vpW, vpH);
+            float border = GetBorderInset(element);
             bool isRow = element.Direction == LayoutDirection.Horizontal;
             float gap = element.Gap;
             float result = 0;
@@ -439,7 +468,7 @@ namespace EchoUI.Render.Win32
             if (isRow && count > 1)
                 result += gap * (count - 1);
 
-            return result + padding.Left + padding.Right;
+            return result + padding.Left + padding.Right + border * 2;
         }
 
         /// <summary>
@@ -451,12 +480,16 @@ namespace EchoUI.Render.Win32
                 return MeasureTextHeight(element, availableWidth);
 
             if (element.ElementType == ElementCoreName.Input)
-                return 24; // Input 默认高度
+            {
+                var inputPadding = ResolveSpacing(element.Padding, 0, vpW, vpH);
+                return 24 + inputPadding.Top + inputPadding.Bottom + GetBorderInset(element) * 2;
+            }
 
             // 容器：递归测量子元素
-            if (element.Children.Count == 0) return 0;
+            if (element.Children.Count == 0) return GetBorderInset(element) * 2;
 
             var padding = ResolveSpacing(element.Padding, 0, vpW, vpH);
+            float border = GetBorderInset(element);
             bool isRow = element.Direction == LayoutDirection.Horizontal;
             float gap = element.Gap;
             float result = 0;
@@ -485,7 +518,7 @@ namespace EchoUI.Render.Win32
             if (!isRow && count > 1)
                 result += gap * (count - 1);
 
-            return result + padding.Top + padding.Bottom;
+            return result + padding.Top + padding.Bottom + border * 2;
         }
 
         private static float MeasureTextWidth(Win32Element element)
@@ -499,11 +532,11 @@ namespace EchoUI.Render.Win32
                 if (element.FontWeight != null)
                 {
                      var weight = element.FontWeight.ToLower();
-                     if (weight is "bold" or "700" or "800" or "900")
+                     if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
                          fontStyle = FontStyle.Bold;
                 }
 
-                using var font = new Font(element.FontFamily ?? "Segoe UI", fontSize, fontStyle, GraphicsUnit.Pixel);
+                using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
                 var size = _measureGraphics.MeasureString(element.Text, font, new PointF(0, 0), _defaultStringFormat);
                 
                 return size.Width;
@@ -522,11 +555,11 @@ namespace EchoUI.Render.Win32
                 if (element.FontWeight != null)
                 {
                      var weight = element.FontWeight.ToLower();
-                     if (weight is "bold" or "700" or "800" or "900")
+                     if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
                          fontStyle = FontStyle.Bold;
                 }
 
-                using var font = new Font(element.FontFamily ?? "Segoe UI", fontSize, fontStyle, GraphicsUnit.Pixel);
+                using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
 
                 // 如果有宽度约束，传入宽度；否则传入虽大宽度
                 float maxWidth = widthConstraint > 0 ? widthConstraint : 100000f;
@@ -534,6 +567,25 @@ namespace EchoUI.Render.Win32
                 
                 return size.Height;
             }
+        }
+
+        private static string ResolveFontFamily(Win32Element element)
+        {
+            if (!string.IsNullOrEmpty(element.FontFamily))
+                return element.FontFamily;
+
+            return IsLikelyEmojiOrSymbol(element.Text) ? "Segoe UI Emoji" : "Segoe UI";
+        }
+
+        private static bool IsLikelyEmojiOrSymbol(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            foreach (var c in text)
+            {
+                if (char.IsSurrogate(c)) return true;
+                if (c >= 0x2000 && c <= 0x33FF) return true;
+            }
+            return false;
         }
 
         private static (float Left, float Top, float Right, float Bottom) ResolveSpacing(
@@ -547,6 +599,11 @@ namespace EchoUI.Render.Win32
                 ResolveSize(s.Right, parentSize, vpW, vpH) ?? 0,
                 ResolveSize(s.Bottom, parentSize, vpW, vpH) ?? 0
             );
+        }
+
+        private static float GetBorderInset(Win32Element element)
+        {
+            return element.BorderStyle == BorderStyle.None ? 0 : Math.Max(0, element.BorderWidth);
         }
 
         private class FlexItem

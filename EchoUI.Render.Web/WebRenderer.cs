@@ -87,6 +87,9 @@ namespace EchoUI.Render.Web
                     domPatch.Styles ??= new();
                     domPatch.Styles["display"] = "flex";
                     domPatch.Styles["box-sizing"] = "border-box";
+                    domPatch.Styles["flex-direction"] = ToCss(p.Direction ?? LayoutDirection.Vertical);
+                    domPatch.Styles["justify-content"] = ToCss(p.JustifyContent ?? JustifyContent.Start);
+                    domPatch.Styles["align-items"] = ToCss(p.AlignItems ?? AlignItems.Start);
                     domPatch.Styles["overflow"] = (p.Overflow.HasValue) ? ToCss(p.Overflow) : null;
                     if (p.Float)
                     {
@@ -140,7 +143,7 @@ namespace EchoUI.Render.Web
                         case nameof(ContainerProps.Padding): SetSpacingStyles(domPatch, "padding", propValue as Spacing?); break;
                         case nameof(ContainerProps.Overflow): domPatch.SetStyle("overflow", ToCss(propValue as Overflow?)); break;
                         case nameof(ContainerProps.Float):
-                            if ((bool)propValue)
+                            if (propValue is true)
                             {
                                 domPatch.SetStyle("height", "0");
                                 domPatch.SetStyle("min-height", "0");
@@ -161,9 +164,9 @@ namespace EchoUI.Render.Web
                             break;
 
                         // --- Flexbox ---
-                        case nameof(ContainerProps.Direction): domPatch.SetStyle("flex-direction", propValue is LayoutDirection.Vertical ? "column" : "row"); break;
+                        case nameof(ContainerProps.Direction): domPatch.SetStyle("flex-direction", ToCss(propValue is LayoutDirection direction ? direction : LayoutDirection.Vertical)); break;
                         case nameof(ContainerProps.JustifyContent): domPatch.SetStyle("justify-content", ToCss(propValue as JustifyContent?)); break;
-                        case nameof(ContainerProps.AlignItems): domPatch.SetStyle("align-items", (propValue as AlignItems?)?.ToString().ToLower()); break;
+                        case nameof(ContainerProps.AlignItems): domPatch.SetStyle("align-items", ToCss(propValue as AlignItems?)); break;
                         case nameof(ContainerProps.Gap): domPatch.SetStyle("gap", propValue != null ? $"{propValue}px" : null); break;
                         case nameof(ContainerProps.FlexGrow): domPatch.SetStyle("flex-grow", propValue != null ? propValue.ToString() : null); break;
                         case nameof(ContainerProps.FlexShrink): domPatch.SetStyle("flex-shrink", propValue != null ? propValue.ToString() : null); break;
@@ -240,7 +243,24 @@ namespace EchoUI.Render.Web
         #region CSS/DOM Converters
         private string? ToCss(Dimension? dim) => dim.HasValue ? dim.Value.Unit switch { DimensionUnit.Pixels => $"{dim.Value.Value}px", DimensionUnit.Percent => $"{dim.Value.Value}%", DimensionUnit.ViewportHeight => $"{dim.Value.Value}vh", _ => "" } : null;
         private string? ToCss(Color? color) => color.HasValue ? $"rgba({color.Value.R},{color.Value.G},{color.Value.B},{(float)color.Value.A / 255})" : null;
-        private string? ToCss(JustifyContent? jc) => jc switch { JustifyContent.SpaceAround => "space-around", JustifyContent.SpaceBetween => "space-between", _ => jc?.ToString().ToLower() };
+        private string ToCss(LayoutDirection direction) => direction == LayoutDirection.Vertical ? "column" : "row";
+        private string? ToCss(JustifyContent? jc) => jc switch
+        {
+            JustifyContent.Start => "flex-start",
+            JustifyContent.End => "flex-end",
+            JustifyContent.Center => "center",
+            JustifyContent.SpaceAround => "space-around",
+            JustifyContent.SpaceBetween => "space-between",
+            _ => null
+        };
+        private string? ToCss(AlignItems? ai) => ai switch
+        {
+            AlignItems.Start => "flex-start",
+            AlignItems.End => "flex-end",
+            AlignItems.Center => "center",
+            AlignItems.Stretch => "stretch",
+            _ => null
+        };
         private string? ToCss(Overflow? overflow) => overflow?.ToString().ToLower();
         private string? ToCss(ValueDictionary<string, Transition>? transitions)
         {
@@ -348,7 +368,7 @@ namespace EchoUI.Render.Web
                 case Action action: action.Invoke(); break;
                 case Action<string> actionStr:
                     var value = JsonSerializer.Deserialize<string>(eventArgsJson, WebRendererJsonContext.Default.String);
-                    actionStr.Invoke(value);
+                    actionStr.Invoke(value ?? string.Empty);
                     break;
                 case Action<Point> actionPoint:
                     var point = JsonSerializer.Deserialize<Point>(eventArgsJson, WebRendererJsonContext.Default.Point);
