@@ -41,86 +41,151 @@ namespace EchoUI.Core
         public static Element ComboBox(ComboBoxProps props)
         {
             var (isOpen, setIsOpen, _) = Hooks.State(false);
-
             var (selectIndex, setSelectIndex, _) = State(props.SelectedIndex);
+            var (hoverIndex, setHoverIndex, _) = State(-1);
+
+            var backgroundColor = props.BackgroundColor ?? Color.White;
+            var textColor = props.TextColor ?? Color.FromHex("1F2937");
+            var borderColor = props.BorderColor ?? Color.FromHex("D0D7E2");
+            var dropdownBackgroundColor = props.DropdownBackgroundColor ?? Color.White;
+            var accentColor = Color.FromHex("4F8CFF");
+            var hoverBackgroundColor = Color.FromHex("F3F7FF");
+            var selectedBackgroundColor = Color.FromHex("EAF2FF");
+            var mutedTextColor = Color.FromHex("6B7280");
 
             var selectedOptionText = (selectIndex.Value >= 0 && selectIndex.Value < props.Options.Count)
                 ? props.Options[selectIndex.Value]
                 : "Select...";
 
-            var (moveIndex, setMoveIndex, _) = State(props.SelectedIndex);
-            // Build the dropdown items list when open
             var dropdownItems = new List<Element>();
             if (isOpen.Value)
             {
                 for (var i = 0; i < props.Options.Count; i++)
                 {
                     var index = i;
+                    var isSelected = selectIndex.Value == index;
+                    var isHovered = hoverIndex.Value == index;
+
                     dropdownItems.Add(Container(new ContainerProps
                     {
                         Key = props.Options[index],
                         Width = Dimension.Percent(100),
-                        Height = Dimension.Pixels(35),
-                        JustifyContent = JustifyContent.Center,
-                        Padding = new Spacing(Dimension.Pixels(8), Dimension.Pixels(6)),
-                        BackgroundColor = moveIndex.Value == index ? Color.Gray : Color.White,
+                        Height = Dimension.Pixels(36),
+                        Direction = LayoutDirection.Horizontal,
+                        JustifyContent = JustifyContent.SpaceBetween,
+                        AlignItems = AlignItems.Center,
+                        Padding = new Spacing(Dimension.Pixels(12), Dimension.Pixels(8)),
+                        BackgroundColor = isHovered ? hoverBackgroundColor : (isSelected ? selectedBackgroundColor : Color.Transparent),
+                        BorderRadius = 6,
+                        OnMouseEnter = () => setHoverIndex(index),
+                        OnMouseLeave = () =>
+                        {
+                            if (hoverIndex.Value == index)
+                                setHoverIndex(-1);
+                        },
                         OnClick = _ =>
                         {
                             setSelectIndex(index);
+                            setHoverIndex(-1);
                             props.OnSelectionChanged?.Invoke(index);
-                            setIsOpen(false); // Close after selection
+                            setIsOpen(false);
                         },
-                        OnMouseMove = _ => setMoveIndex(index),
-                        Children = [Text(new TextProps { Text = props.Options[index], Color = props.TextColor ?? Color.Black })]
+                        Children =
+                        [
+                            Text(new TextProps
+                            {
+                                Text = props.Options[index],
+                                Color = isSelected ? accentColor : textColor
+                            }),
+                            Text(new TextProps
+                            {
+                                Text = isSelected ? "✓" : string.Empty,
+                                Color = accentColor,
+                                FontSize = 11,
+                                MouseThrough = true
+                            })
+                        ]
                     }));
                 }
             }
 
-            return Container(new ContainerProps // Main wrapper
+            var visibleOptionCount = Math.Min(props.Options.Count, 6);
+            var shouldScroll = props.Options.Count > visibleOptionCount;
+            var dropdownHeight = isOpen.Value
+                ? Dimension.Pixels(visibleOptionCount * 36 + Math.Max(0, visibleOptionCount - 1) * 4 + 8 + 2)
+                : Dimension.ZeroPixels;
+
+            return Container(new ContainerProps
             {
                 Key = props.Key,
                 Direction = LayoutDirection.Vertical,
                 Overflow = Overflow.Visible,
+                OnBlur = () =>
+                {
+                    setIsOpen(false);
+                    setHoverIndex(-1);
+                },
                 Children =
                 [
-                    // Display box
                     Container(new ContainerProps
                     {
                         Width = Dimension.Percent(100),
+                        Height = Dimension.Pixels(36),
                         Direction = LayoutDirection.Horizontal,
                         JustifyContent = JustifyContent.SpaceBetween,
                         AlignItems = AlignItems.Center,
-                        Padding = new Spacing(Dimension.Pixels(8), Dimension.Pixels(6)),
-                        BackgroundColor = props.BackgroundColor ?? Color.White,
+                        Padding = new Spacing(Dimension.Pixels(12), Dimension.Pixels(8)),
+                        BackgroundColor = backgroundColor,
                         BorderWidth = 1,
                         BorderStyle = BorderStyle.Solid,
-                        BorderColor = props.BorderColor ?? Color.Gray,
-                        OnClick = _ => setIsOpen(!isOpen.Value),
+                        BorderColor = isOpen.Value ? accentColor : borderColor,
+                        BorderRadius = 6,
+                        OnClick = _ =>
+                        {
+                            setHoverIndex(-1);
+                            setIsOpen(!isOpen.Value);
+                        },
                         Children =
                         [
-                            Text(new TextProps { Text = selectedOptionText, Color = props.TextColor ?? Color.Black }),
-                            Text(new TextProps { Text = "▼", FontSize = 10, Color = props.TextColor ?? Color.Gray })
+                            Text(new TextProps
+                            {
+                                Text = selectedOptionText,
+                                Color = textColor,
+                                NoWrap = true
+                            }),
+                            Text(new TextProps
+                            {
+                                Text = isOpen.Value ? "▲" : "▼",
+                                FontSize = 10,
+                                Color = isOpen.Value ? accentColor : mutedTextColor,
+                                MouseThrough = true
+                            })
                         ]
                     }),
-
-                    // Dropdown list wrapper (Floating)
                     Container(new ContainerProps
                     {
                         Float = true,
                         Width = Dimension.Percent(100),
-                        Children = [
+                        Margin = new Spacing(Dimension.ZeroPixels, Dimension.Pixels(4), Dimension.ZeroPixels, Dimension.ZeroPixels),
+                        Children =
+                        [
                             Container(new ContainerProps
                             {
                                 Width = Dimension.Percent(100),
-                                Height = isOpen.Value ? Dimension.Pixels(35 * props.Options.Count + 2) : Dimension.ZeroPixels,
-                                Transitions = [
-                                    [nameof(ContainerProps.Height), new Transition(150, Easing.EaseInOut)]
-                                ],
+                                Height = dropdownHeight,
+                                Padding = new Spacing(Dimension.Pixels(4)),
                                 Direction = LayoutDirection.Vertical,
-                                BackgroundColor = props.DropdownBackgroundColor ?? Color.White,
+                                Gap = 4,
+                                Overflow = Overflow.Auto,
+                                BackgroundColor = dropdownBackgroundColor,
                                 BorderWidth = isOpen.Value ? 1 : 0,
                                 BorderStyle = BorderStyle.Solid,
-                                BorderColor = props.BorderColor ?? Color.Gray,
+                                BorderColor = borderColor,
+                                BorderRadius = 8,
+                                Transitions =
+                                [
+                                    [nameof(ContainerProps.Height), new Transition(150, Easing.EaseInOut)]
+                                ],
                                 Children = dropdownItems
                             })
                         ]
