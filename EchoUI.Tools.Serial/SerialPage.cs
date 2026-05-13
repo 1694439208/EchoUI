@@ -19,65 +19,60 @@ public static class SerialPage
 
     public static Element Create(Props props)
     {
-        // Global State for the page
         var (ports, setPorts, _) = State(SerialPort.GetPortNames().ToList());
         var (selectedPortIndex, setSelectedPortIndex, _) = State(0);
-        
-        var (baudRateIndex, setBaudRateIndex, _) = State(5); // Default 9600
+
+        var (baudRateIndex, setBaudRateIndex, _) = State(5);
         var baudRates = new List<string> { "300", "600", "1200", "2400", "4800", "9600", "14400", "19200", "38400", "57600", "115200" };
 
-        var (dataBitsIndex, setDataBitsIndex, _) = State(3); // 8
+        var (dataBitsIndex, setDataBitsIndex, _) = State(3);
         var dataBitsOptions = new List<string> { "5", "6", "7", "8" };
 
-        var (stopBitsIndex, setStopBitsIndex, _) = State(1); // One (Index 1)
-        var stopBitsOptions = Enum.GetNames(typeof(StopBits)).ToList(); 
+        var (stopBitsIndex, setStopBitsIndex, _) = State(1);
+        var stopBitsOptions = Enum.GetNames(typeof(StopBits)).ToList();
 
-        var (parityIndex, setParityIndex, _) = State(0); // None
-        var parityOptions = Enum.GetNames(typeof(Parity)).ToList(); 
+        var (parityIndex, setParityIndex, _) = State(0);
+        var parityOptions = Enum.GetNames(typeof(Parity)).ToList();
 
         var (isOpen, setIsOpen, _) = State(false);
         var (receivedData, setReceivedData, updateReceivedData) = State(new StringBuilder());
         var (sendText, setSendText, _) = State("");
         var (hexDisplay, setHexDisplay, _) = State(false);
         var (hexSend, setHexSend, _) = State(false);
-        
-        var portHolder = Memo(() => new PortHolder(), new object[] { });
 
-        // Effect for Serial Port Logic
+        var portHolder = Memo(() => new PortHolder(), []);
+
         Effect(() =>
         {
-            if (!isOpen.Value) return null;
+            if (!isOpen.Value)
+                return null;
 
-            string portName = "";
-            int baud = 9600;
-            
             if (ports.Value.Count == 0 || selectedPortIndex.Value < 0)
             {
                 setIsOpen(false);
                 return null;
             }
 
-            int pIndex = selectedPortIndex.Value;
-            // Bound check for safety
-            if (pIndex >= ports.Value.Count) pIndex = 0;
-            // If ports empty, already handled above
-            portName = ports.Value[pIndex];
-            
-            if (baudRateIndex.Value >= 0 && baudRateIndex.Value < baudRates.Count)
-                baud = int.Parse(baudRates[baudRateIndex.Value]);
+            var portIndex = selectedPortIndex.Value >= ports.Value.Count ? 0 : selectedPortIndex.Value;
+            var portName = ports.Value[portIndex];
+            var baud = baudRateIndex.Value >= 0 && baudRateIndex.Value < baudRates.Count
+                ? int.Parse(baudRates[baudRateIndex.Value])
+                : 9600;
 
             SerialPort? serialPort = null;
             try
             {
-                serialPort = new SerialPort(portName, baud);
-                serialPort.DataBits = int.Parse(dataBitsOptions[dataBitsIndex.Value]);
-                serialPort.StopBits = (StopBits)Enum.Parse(typeof(StopBits), stopBitsOptions[stopBitsIndex.Value]);
-                serialPort.Parity = (Parity)Enum.Parse(typeof(Parity), parityOptions[parityIndex.Value]);
-                
+                serialPort = new SerialPort(portName, baud)
+                {
+                    DataBits = int.Parse(dataBitsOptions[dataBitsIndex.Value]),
+                    StopBits = (StopBits)Enum.Parse(typeof(StopBits), stopBitsOptions[stopBitsIndex.Value]),
+                    Parity = (Parity)Enum.Parse(typeof(Parity), parityOptions[parityIndex.Value])
+                };
+
                 serialPort.Open();
-                portHolder.Port = serialPort; 
+                portHolder.Port = serialPort;
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 setIsOpen(false);
                 updateReceivedData(sb => sb.AppendLine($"Error: {ex.Message}"));
@@ -85,36 +80,28 @@ public static class SerialPage
             }
 
             var syncContext = SynchronizationContext.Current;
-            
+
             void DataReceived(object sender, SerialDataReceivedEventArgs e)
             {
                 var sp = (SerialPort)sender;
-                try 
+                try
                 {
-                    int bytesToRead = sp.BytesToRead;
-                    byte[] buffer = new byte[bytesToRead];
+                    var bytesToRead = sp.BytesToRead;
+                    var buffer = new byte[bytesToRead];
                     sp.Read(buffer, 0, bytesToRead);
-                    
-                    if (buffer.Length > 0)
-                    {
-                        string textToAdd;
-                        // Determine display format based on CURRENT state when data arrives
-                        // Note: hexDisplay.Value inside this callback might be stale if closure captured old state logic?
-                        // Actually, DataReceived runs on threadpool. accessing hexDisplay.Value (which is Ref<bool>) is valid but thread-safety?
-                        // Ref<T> is just a class wrapper. Reading bool is atomic.
-                        // However, we want the latest value. hexDisplay Ref is stable.
-                        if (hexDisplay.Value)
-                        {
-                            textToAdd = BitConverter.ToString(buffer).Replace("-", " ") + " ";
-                        }
-                        else
-                        {
-                            textToAdd = Encoding.UTF8.GetString(buffer);
-                        }
-                        syncContext?.Post(_ => updateReceivedData(sb => sb.Append(textToAdd)), null);
-                    }
+
+                    if (buffer.Length <= 0)
+                        return;
+
+                    var textToAdd = hexDisplay.Value
+                        ? BitConverter.ToString(buffer).Replace("-", " ") + " "
+                        : Encoding.UTF8.GetString(buffer);
+
+                    syncContext?.Post(_ => updateReceivedData(sb => sb.Append(textToAdd)), null);
                 }
-                catch { }
+                catch
+                {
+                }
             }
 
             serialPort.DataReceived += DataReceived;
@@ -126,175 +113,640 @@ public static class SerialPage
                 {
                     serialPort.DataReceived -= DataReceived;
                     serialPort.Close();
-                    syncContext?.Post(_ => updateReceivedData(sb => sb.AppendLine($"Disconnected.")), null);
+                    syncContext?.Post(_ => updateReceivedData(sb => sb.AppendLine("Disconnected.")), null);
                 }
-                if (serialPort != null) serialPort.Dispose();
+
+                serialPort?.Dispose();
                 portHolder.Port = null;
             };
-        }, new object[] { isOpen.Value, selectedPortIndex.Value, baudRateIndex.Value, ports.Value, dataBitsIndex.Value, stopBitsIndex.Value, parityIndex.Value }); 
-        // Note: hexDisplay removed from Effect deps so toggling it doesn't reconnect!
-        // But that means existing data isn't re-rendered. New data will follow new format.
-        // User might expect "View changes" but that requires storing raw Buffer. 
-        // For now, "New data follows format" is acceptable for simple tool.
-        // If I want to change view of OLD data, I would need a different architecture.
+        }, [isOpen.Value, selectedPortIndex.Value, baudRateIndex.Value, ports.Value, dataBitsIndex.Value, stopBitsIndex.Value, parityIndex.Value]);
+
+        void RefreshPorts()
+        {
+            var nextPorts = SerialPort.GetPortNames().ToList();
+            setPorts(nextPorts);
+            setSelectedPortIndex(nextPorts.Count == 0 ? 0 : Math.Clamp(selectedPortIndex.Value, 0, nextPorts.Count - 1));
+        }
 
         void SendData()
         {
             var text = sendText.Value;
-            if (string.IsNullOrEmpty(text)) return;
-            
+            if (string.IsNullOrEmpty(text))
+                return;
+
             var port = portHolder.Port;
-            if (port != null && port.IsOpen)
+            if (port == null || !port.IsOpen)
+                return;
+
+            try
             {
-                try
+                if (hexSend.Value)
                 {
-                    if (hexSend.Value)
-                    {
-                        // Parse Hex
-                        string[] hexValues = text.Split(new[] { ' ', '-', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                        byte[] bytes = hexValues.Select(h => Convert.ToByte(h, 16)).ToArray();
-                        port.Write(bytes, 0, bytes.Length);
-                    }
-                    else
-                    {
-                        port.Write(text);
-                    }
-                    setSendText("");
+                    var hexValues = text.Split(new[] { ' ', '-', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    var bytes = hexValues.Select(h => Convert.ToByte(h, 16)).ToArray();
+                    port.Write(bytes, 0, bytes.Length);
                 }
-                catch (Exception ex)
+                else
                 {
-                    updateReceivedData(sb => sb.AppendLine($"Send Error: {ex.Message}"));
+                    port.Write(text);
                 }
+
+                setSendText("");
+            }
+            catch (Exception ex)
+            {
+                updateReceivedData(sb => sb.AppendLine($"Send Error: {ex.Message}"));
             }
         }
+
+        var portOptions = ports.Value.Count > 0 ? ports.Value : new List<string> { "No ports detected" };
+        var effectivePortIndex = ports.Value.Count == 0 ? 0 : Math.Clamp(selectedPortIndex.Value, 0, ports.Value.Count - 1);
+        var selectedPortName = ports.Value.Count == 0 ? "未检测到串口" : portOptions[effectivePortIndex];
+        var currentBaud = baudRates[Math.Clamp(baudRateIndex.Value, 0, baudRates.Count - 1)];
+        var currentDataBits = dataBitsOptions[Math.Clamp(dataBitsIndex.Value, 0, dataBitsOptions.Count - 1)];
+        var currentStopBits = stopBitsOptions[Math.Clamp(stopBitsIndex.Value, 0, stopBitsOptions.Count - 1)];
+        var currentParity = parityOptions[Math.Clamp(parityIndex.Value, 0, parityOptions.Count - 1)];
+        var receivedText = receivedData.Value.ToString();
+        var hasReceivedData = receivedText.Length > 0;
+        var receivedLineCount = hasReceivedData ? receivedText.Count(c => c == '\n') + 1 : 0;
+        var connectionSummary = ports.Value.Count == 0
+            ? "等待检测串口设备"
+            : $"{selectedPortName} · {currentBaud} · {currentDataBits}bit · {currentParity} · {currentStopBits}";
 
         return Container(new ContainerProps
         {
             Width = Dimension.Percent(100),
             Height = Dimension.Percent(100),
             Direction = LayoutDirection.Horizontal,
-            BackgroundColor = Color.FromHex("#F3F3F3"),
-            Children = 
+            BackgroundColor = Color.FromHex("#EEF3F8"),
+            Padding = new Spacing(Dimension.Pixels(18)),
+            Gap = 18,
+            Children =
             [
-                // Sidebar
                 Container(new ContainerProps
                 {
-                    Width = Dimension.Pixels(250),
+                    Width = Dimension.Pixels(320),
                     Height = Dimension.Percent(100),
+                    Direction = LayoutDirection.Vertical,
+                    AlignItems = AlignItems.Stretch,
+                    Gap = 16,
                     BackgroundColor = Color.White,
-                    Padding = new Spacing(Dimension.Pixels(20)),
-                    Gap = 10,
                     BorderWidth = 1,
-                    BorderColor = Color.LightGray, 
-                    Children = [
-                        Text(new TextProps { Text = "Setup", FontSize = 18, FontWeight = "Bold", Color = Color.FromHex("#333333") }),
-                        
-                        Text(new TextProps { Text = "Port", FontSize = 12, Color = Color.Gray }),
-                        Container(new ContainerProps {
-                             Direction = LayoutDirection.Horizontal, Gap=5, Children=[
-                                 Container(new ContainerProps { Width=Dimension.Percent(80), Children=[
-                                     ComboBox(new ComboBoxProps { Options = ports.Value.Count > 0 ? ports.Value : new List<string>{"None"}, SelectedIndex = selectedPortIndex.Value, OnSelectionChanged = idx => setSelectedPortIndex(idx) })
-                                 ]}),
-                                 Button(new ButtonProps { Text="R", Width=Dimension.Pixels(30), BackgroundColor=Color.LightGray, OnClick=_=> setPorts(SerialPort.GetPortNames().ToList()) })
-                             ]
+                    BorderColor = Color.FromHex("#D8E1EC"),
+                    BorderRadius = 20,
+                    Padding = new Spacing(Dimension.Pixels(18)),
+                    Overflow = Overflow.Auto,
+                    Children =
+                    [
+                        Container(new ContainerProps
+                        {
+                            Direction = LayoutDirection.Vertical,
+                            Gap = 4,
+                            Children =
+                            [
+                                Text(new TextProps
+                                {
+                                    Text = "Serial Tool",
+                                    FontSize = 26,
+                                    FontWeight = "Bold",
+                                    Color = Color.FromHex("#0F172A")
+                                }),
+                                Text(new TextProps
+                                {
+                                    Text = "串口连接、监听与发送工作台",
+                                    FontSize = 13,
+                                    Color = Color.FromHex("#64748B")
+                                })
+                            ]
                         }),
 
-                        Text(new TextProps { Text = "Baud Rate", FontSize = 12, Color = Color.Gray }),
-                        ComboBox(new ComboBoxProps { Options = baudRates, SelectedIndex = baudRateIndex.Value, OnSelectionChanged = idx => setBaudRateIndex(idx) }),
+                        CreateStatusSurface(isOpen.Value, selectedPortName, connectionSummary),
 
-                        Text(new TextProps { Text = "Data Bits", FontSize = 12, Color = Color.Gray }),
-                        ComboBox(new ComboBoxProps { Options = dataBitsOptions, SelectedIndex = dataBitsIndex.Value, OnSelectionChanged = idx => setDataBitsIndex(idx) }),
+                        CreatePanel(
+                            "连接",
+                            "选择端口并建立连接",
+                            [
+                                CreateField(
+                                    "串口",
+                                    Container(new ContainerProps
+                                    {
+                                        Direction = LayoutDirection.Horizontal,
+                                        AlignItems = AlignItems.Center,
+                                        Gap = 10,
+                                        Children =
+                                        [
+                                            Container(new ContainerProps
+                                            {
+                                                FlexGrow = 1,
+                                                Children =
+                                                [
+                                                    ComboBox(new ComboBoxProps
+                                                    {
+                                                        Options = portOptions,
+                                                        SelectedIndex = effectivePortIndex,
+                                                        OnSelectionChanged = idx => setSelectedPortIndex(idx)
+                                                    })
+                                                ]
+                                            }),
+                                            Button(new ButtonProps
+                                            {
+                                                Text = "刷新",
+                                                Width = Dimension.Pixels(74),
+                                                OnClick = _ => RefreshPorts(),
+                                                BackgroundColor = Color.FromHex("#E2E8F0"),
+                                                TextColor = Color.FromHex("#0F172A")
+                                            })
+                                        ]
+                                    }),
+                                    ports.Value.Count == 0 ? "请连接设备后点击刷新。" : null),
 
-                        Text(new TextProps { Text = "Stop Bits", FontSize = 12, Color = Color.Gray }),
-                        ComboBox(new ComboBoxProps { Options = stopBitsOptions, SelectedIndex = stopBitsIndex.Value, OnSelectionChanged = idx => setStopBitsIndex(idx) }),
+                                Button(new ButtonProps
+                                {
+                                    Text = isOpen.Value ? "关闭串口" : "打开串口",
+                                    Width = Dimension.Percent(100),
+                                    Height = Dimension.Pixels(44),
+                                    BackgroundColor = isOpen.Value ? Color.FromHex("#EF4444") : Color.FromHex("#2563EB"),
+                                    HoverColor = isOpen.Value ? Color.FromHex("#DC2626") : Color.FromHex("#1D4ED8"),
+                                    PressedColor = isOpen.Value ? Color.FromHex("#B91C1C") : Color.FromHex("#1E40AF"),
+                                    TextColor = Color.White,
+                                    BorderRadius = 12,
+                                    OnClick = _ => setIsOpen(!isOpen.Value)
+                                })
+                            ]),
 
-                        Text(new TextProps { Text = "Parity", FontSize = 12, Color = Color.Gray }),
-                        ComboBox(new ComboBoxProps { Options = parityOptions, SelectedIndex = parityIndex.Value, OnSelectionChanged = idx => setParityIndex(idx) }),
+                        CreatePanel(
+                            "串口参数",
+                            "连接前设置基础通信参数",
+                            [
+                                CreateField("Baud Rate", ComboBox(new ComboBoxProps { Options = baudRates, SelectedIndex = baudRateIndex.Value, OnSelectionChanged = idx => setBaudRateIndex(idx) })),
+                                CreateField("Data Bits", ComboBox(new ComboBoxProps { Options = dataBitsOptions, SelectedIndex = dataBitsIndex.Value, OnSelectionChanged = idx => setDataBitsIndex(idx) })),
+                                CreateField("Stop Bits", ComboBox(new ComboBoxProps { Options = stopBitsOptions, SelectedIndex = stopBitsIndex.Value, OnSelectionChanged = idx => setStopBitsIndex(idx) })),
+                                CreateField("Parity", ComboBox(new ComboBoxProps { Options = parityOptions, SelectedIndex = parityIndex.Value, OnSelectionChanged = idx => setParityIndex(idx) }))
+                            ]),
 
-                        Container(new ContainerProps { Height = Dimension.Pixels(10) }),
-
-                        Button(new ButtonProps {
-                            Text = isOpen.Value ? "Close" : "Open",
-                            BackgroundColor = isOpen.Value ? Color.FromHex("#EF4444") : Color.FromHex("#10B981"),
-                            TextColor = Color.White,
-                            Height = Dimension.Pixels(40),
-                            BorderRadius = 4,
-                            OnClick = _ => setIsOpen(!isOpen.Value)
-                        })
+                        CreatePanel(
+                            "提示",
+                            "使用建议",
+                            [
+                                Text(new TextProps
+                                {
+                                    Text = "· 接收区会保留当前会话日志。\n· HEX 发送使用空格、逗号或 - 分隔字节。\n· 视图模式切换只影响新收到的数据显示。",
+                                    FontSize = 12,
+                                    Color = Color.FromHex("#64748B")
+                                })
+                            ])
                     ]
                 }),
-                
-                // Main Content
+
                 Container(new ContainerProps
                 {
                     FlexGrow = 1,
                     Height = Dimension.Percent(100),
-                    Padding = new Spacing(Dimension.Pixels(10)),
-                    Gap = 10,
-                    Children = [
-                         // Controls
-                         Container(new ContainerProps {
-                             Direction = LayoutDirection.Horizontal,
-                             Gap = 10,
-                             AlignItems = AlignItems.Center,
-                             Children = [
-                                 Button(new ButtonProps { Text = "Clear", Width = Dimension.Pixels(60), OnClick = _ => setReceivedData(new StringBuilder()) }),
-                                 CheckBox(new CheckBoxProps { Label = "Hex Display", IsChecked = hexDisplay.Value, OnToggle = v => setHexDisplay(v) })
-                             ]
-                         }),
+                    Direction = LayoutDirection.Vertical,
+                    AlignItems = AlignItems.Stretch,
+                    Gap = 16,
+                    Children =
+                    [
+                        Container(new ContainerProps
+                        {
+                            Width = Dimension.Percent(100),
+                            BackgroundColor = Color.White,
+                            BorderWidth = 1,
+                            BorderColor = Color.FromHex("#D8E1EC"),
+                            BorderRadius = 20,
+                            Padding = new Spacing(Dimension.Pixels(18)),
+                            Direction = LayoutDirection.Horizontal,
+                            JustifyContent = JustifyContent.SpaceBetween,
+                            AlignItems = AlignItems.Center,
+                            Children =
+                            [
+                                Container(new ContainerProps
+                                {
+                                    Direction = LayoutDirection.Vertical,
+                                    Gap = 4,
+                                    Children =
+                                    [
+                                        Text(new TextProps
+                                        {
+                                            Text = "Console Workspace",
+                                            FontSize = 22,
+                                            FontWeight = "Bold",
+                                            Color = Color.FromHex("#0F172A")
+                                        }),
+                                        Text(new TextProps
+                                        {
+                                            Text = connectionSummary,
+                                            FontSize = 13,
+                                            Color = Color.FromHex("#64748B")
+                                        })
+                                    ]
+                                }),
+                                Container(new ContainerProps
+                                {
+                                    Direction = LayoutDirection.Horizontal,
+                                    Gap = 10,
+                                    AlignItems = AlignItems.Center,
+                                    Children =
+                                    [
+                                        CreateModePill(hexDisplay.Value ? "HEX 视图" : "文本视图", hexDisplay.Value ? Color.FromHex("#F59E0B") : Color.FromHex("#2563EB")),
+                                        CreateModePill(hexSend.Value ? "HEX 发送" : "文本发送", hexSend.Value ? Color.FromHex("#8B5CF6") : Color.FromHex("#0F766E"))
+                                    ]
+                                })
+                            ]
+                        }),
 
-                         // Received Data Area
-                         Container(new ContainerProps {
-                             FlexGrow = 1,
-                             Width = Dimension.Percent(100),
-                             BackgroundColor = Color.White,
-                             BorderWidth = 1,
-                             BorderColor = Color.LightGray,
-                             BorderRadius = 4,
-                             Padding = new Spacing(Dimension.Pixels(5)),
-                             Overflow = Overflow.Scroll,
-                             Children = [
-                                 Text(new TextProps { 
-                                     Text = receivedData.Value.ToString(), 
-                                     FontFamily = "Consolas, monospace",
-                                     FontSize = 13
-                                 })
-                             ]
-                         }),
+                        Container(new ContainerProps
+                        {
+                            Width = Dimension.Percent(100),
+                            FlexGrow = 1,
+                            BackgroundColor = Color.White,
+                            BorderWidth = 1,
+                            BorderColor = Color.FromHex("#D8E1EC"),
+                            BorderRadius = 20,
+                            Padding = new Spacing(Dimension.Pixels(18)),
+                            Direction = LayoutDirection.Vertical,
+                            Gap = 14,
+                            Children =
+                            [
+                                Container(new ContainerProps
+                                {
+                                    Direction = LayoutDirection.Horizontal,
+                                    JustifyContent = JustifyContent.SpaceBetween,
+                                    AlignItems = AlignItems.Center,
+                                    Children =
+                                    [
+                                        Container(new ContainerProps
+                                        {
+                                            Direction = LayoutDirection.Vertical,
+                                            Gap = 4,
+                                            Children =
+                                            [
+                                                Text(new TextProps
+                                                {
+                                                    Text = "接收数据",
+                                                    FontSize = 18,
+                                                    FontWeight = "Bold",
+                                                    Color = Color.FromHex("#0F172A")
+                                                }),
+                                                Text(new TextProps
+                                                {
+                                                    Text = $"{receivedLineCount} 行 · {receivedText.Length} 字符",
+                                                    FontSize = 12,
+                                                    Color = Color.FromHex("#94A3B8")
+                                                })
+                                            ]
+                                        }),
+                                        Container(new ContainerProps
+                                        {
+                                            Direction = LayoutDirection.Horizontal,
+                                            AlignItems = AlignItems.Center,
+                                            Gap = 16,
+                                            Children =
+                                            [
+                                                CreateToggleRow("HEX 显示", "新接收数据按 HEX 渲染", hexDisplay.Value, v => setHexDisplay(v)),
+                                                Button(new ButtonProps
+                                                {
+                                                    Text = "清空日志",
+                                                    Width = Dimension.Pixels(92),
+                                                    BackgroundColor = Color.FromHex("#E2E8F0"),
+                                                    TextColor = Color.FromHex("#0F172A"),
+                                                    OnClick = _ => setReceivedData(new StringBuilder())
+                                                })
+                                            ]
+                                        })
+                                    ]
+                                }),
+                                Container(new ContainerProps
+                                {
+                                    FlexGrow = 1,
+                                    Width = Dimension.Percent(100),
+                                    BackgroundColor = Color.FromHex("#0F172A"),
+                                    BorderWidth = 1,
+                                    BorderColor = Color.FromHex("#1E293B"),
+                                    BorderRadius = 16,
+                                    Padding = new Spacing(Dimension.Pixels(14)),
+                                    Overflow = Overflow.Scroll,
+                                    Children =
+                                    [
+                                        Text(new TextProps
+                                        {
+                                            Text = hasReceivedData ? receivedText : "等待串口数据…",
+                                            FontFamily = "Consolas, monospace",
+                                            FontSize = 13,
+                                            Color = hasReceivedData ? Color.FromHex("#E2E8F0") : Color.FromHex("#64748B")
+                                        })
+                                    ]
+                                })
+                            ]
+                        }),
 
-                         // Send Area
-                         Container(new ContainerProps {
-                             Height = Dimension.Pixels(40),
-                             Direction = LayoutDirection.Horizontal,
-                             Gap = 5,
-                             Children = [
-                                 CheckBox(new CheckBoxProps { Label = "Hex", IsChecked = hexSend.Value, OnToggle = v => setHexSend(v) }),
-                                 Container(new ContainerProps {
-                                     FlexGrow = 1,
-                                     BackgroundColor = Color.White,
-                                     BorderWidth = 1,
-                                     BorderColor = Color.LightGray,
-                                     BorderRadius = 4,
-                                     Padding = new Spacing(Dimension.Pixels(5)),
-                                     Children = [
-                                         Input(new InputProps {
-                                             Value = sendText.Value,
-                                             OnValueChanged = v => setSendText(v),
-                                             BackgroundColor = Color.Transparent
-                                         })
-                                     ]
-                                 }),
-                                 Button(new ButtonProps {
-                                     Text = "Send",
-                                     Width = Dimension.Pixels(60),
-                                     BackgroundColor = Color.FromHex("#3B82F6"),
-                                     TextColor = Color.White,
-                                     BorderRadius = 4,
-                                     OnClick = _ => SendData()
-                                 })
-                             ]
-                         })
+                        Container(new ContainerProps
+                        {
+                            Width = Dimension.Percent(100),
+                            BackgroundColor = Color.White,
+                            BorderWidth = 1,
+                            BorderColor = Color.FromHex("#D8E1EC"),
+                            BorderRadius = 20,
+                            Padding = new Spacing(Dimension.Pixels(18)),
+                            Direction = LayoutDirection.Vertical,
+                            Gap = 14,
+                            Children =
+                            [
+                                Container(new ContainerProps
+                                {
+                                    Direction = LayoutDirection.Horizontal,
+                                    JustifyContent = JustifyContent.SpaceBetween,
+                                    AlignItems = AlignItems.Center,
+                                    Children =
+                                    [
+                                        Container(new ContainerProps
+                                        {
+                                            Direction = LayoutDirection.Vertical,
+                                            Gap = 4,
+                                            Children =
+                                            [
+                                                Text(new TextProps
+                                                {
+                                                    Text = "发送数据",
+                                                    FontSize = 18,
+                                                    FontWeight = "Bold",
+                                                    Color = Color.FromHex("#0F172A")
+                                                }),
+                                                Text(new TextProps
+                                                {
+                                                    Text = "可发送文本或 HEX 字节序列",
+                                                    FontSize = 12,
+                                                    Color = Color.FromHex("#94A3B8")
+                                                })
+                                            ]
+                                        }),
+                                        CreateToggleRow("HEX 发送", "按字节数组写入", hexSend.Value, v => setHexSend(v))
+                                    ]
+                                }),
+                                Container(new ContainerProps
+                                {
+                                    Width = Dimension.Percent(100),
+                                    Direction = LayoutDirection.Horizontal,
+                                    AlignItems = AlignItems.Center,
+                                    Gap = 12,
+                                    Children =
+                                    [
+                                        Container(new ContainerProps
+                                        {
+                                            FlexGrow = 1,
+                                            Children =
+                                            [
+                                                TextInput(new TextInputProps
+                                                {
+                                                    Value = sendText.Value,
+                                                    OnValueChanged = v => setSendText(v),
+                                                    Placeholder = hexSend.Value ? "输入 HEX，例如 AA 01 FF" : "输入要发送的文本…",
+                                                    Width = Dimension.Percent(100),
+                                                    Height = Dimension.Pixels(46),
+                                                    BackgroundColor = Color.FromHex("#F8FAFC"),
+                                                    TextColor = Color.FromHex("#0F172A"),
+                                                    PlaceholderColor = Color.FromHex("#94A3B8"),
+                                                    BorderColor = Color.FromHex("#CBD5E1"),
+                                                    FocusedBorderColor = Color.FromHex("#2563EB"),
+                                                    CaretColor = Color.FromHex("#2563EB"),
+                                                    BorderRadius = 14,
+                                                    Padding = new Spacing(Dimension.Pixels(12), Dimension.Pixels(10))
+                                                })
+                                            ]
+                                        }),
+                                        Button(new ButtonProps
+                                        {
+                                            Text = "发送",
+                                            Width = Dimension.Pixels(96),
+                                            Height = Dimension.Pixels(46),
+                                            BackgroundColor = Color.FromHex("#2563EB"),
+                                            HoverColor = Color.FromHex("#1D4ED8"),
+                                            PressedColor = Color.FromHex("#1E40AF"),
+                                            TextColor = Color.White,
+                                            BorderRadius = 14,
+                                            OnClick = _ => SendData()
+                                        })
+                                    ]
+                                }),
+                                Text(new TextProps
+                                {
+                                    Text = hexSend.Value
+                                        ? "HEX 发送示例：AA 01 FF 或 AA-01-FF"
+                                        : "文本发送将按当前字符串直接写入串口。",
+                                    FontSize = 12,
+                                    Color = Color.FromHex("#64748B")
+                                })
+                            ]
+                        })
                     ]
+                })
+            ]
+        });
+    }
+
+    private static Element CreateStatusSurface(bool isOpen, string portName, string summary)
+    {
+        var accentColor = isOpen ? Color.FromHex("#10B981") : Color.FromHex("#94A3B8");
+        var title = isOpen ? "已连接" : "未连接";
+        var subtitle = isOpen ? portName : "等待打开串口";
+
+        return Container(new ContainerProps
+        {
+            Width = Dimension.Percent(100),
+            BackgroundColor = isOpen ? Color.FromHex("#ECFDF5") : Color.FromHex("#F8FAFC"),
+            BorderWidth = 1,
+            BorderColor = isOpen ? Color.FromHex("#A7F3D0") : Color.FromHex("#E2E8F0"),
+            BorderRadius = 18,
+            Padding = new Spacing(Dimension.Pixels(16)),
+            Direction = LayoutDirection.Vertical,
+            Gap = 10,
+            Children =
+            [
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    AlignItems = AlignItems.Center,
+                    Gap = 10,
+                    Children =
+                    [
+                        Container(new ContainerProps
+                        {
+                            Width = Dimension.Pixels(10),
+                            Height = Dimension.Pixels(10),
+                            BackgroundColor = accentColor,
+                            BorderRadius = 999
+                        }),
+                        Text(new TextProps
+                        {
+                            Text = title,
+                            FontSize = 14,
+                            FontWeight = "Bold",
+                            Color = Color.FromHex("#0F172A")
+                        })
+                    ]
+                }),
+                Text(new TextProps
+                {
+                    Text = subtitle,
+                    FontSize = 16,
+                    FontWeight = "Bold",
+                    Color = Color.FromHex("#0F172A")
+                }),
+                Text(new TextProps
+                {
+                    Text = summary,
+                    FontSize = 12,
+                    Color = Color.FromHex("#64748B")
+                })
+            ]
+        });
+    }
+
+    private static Element CreatePanel(string title, string description, IReadOnlyList<Element> children)
+    {
+        return Container(new ContainerProps
+        {
+            BackgroundColor = Color.FromHex("#F8FAFC"),
+            BorderWidth = 1,
+            BorderColor = Color.FromHex("#E2E8F0"),
+            BorderRadius = 18,
+            Padding = new Spacing(Dimension.Pixels(16)),
+            Direction = LayoutDirection.Vertical,
+            Gap = 12,
+            Children =
+            [
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Vertical,
+                    Gap = 4,
+                    Children =
+                    [
+                        Text(new TextProps
+                        {
+                            Text = title,
+                            FontSize = 15,
+                            FontWeight = "Bold",
+                            Color = Color.FromHex("#0F172A")
+                        }),
+                        Text(new TextProps
+                        {
+                            Text = description,
+                            FontSize = 12,
+                            Color = Color.FromHex("#64748B")
+                        })
+                    ]
+                }),
+                Container(new ContainerProps
+                {
+                    Width = Dimension.Percent(100),
+                    Direction = LayoutDirection.Vertical,
+                    AlignItems = AlignItems.Stretch,
+                    Gap = 12,
+                    Children = children
+                })
+            ]
+        });
+    }
+
+    private static Element CreateField(string label, Element control, string? hint = null)
+    {
+        return Container(new ContainerProps
+        {
+            Direction = LayoutDirection.Vertical,
+            Gap = 6,
+            Children =
+            [
+                Text(new TextProps
+                {
+                    Text = label,
+                    FontSize = 12,
+                    FontWeight = "Bold",
+                    Color = Color.FromHex("#334155")
+                }),
+                control,
+                string.IsNullOrWhiteSpace(hint)
+                    ? Empty()
+                    : Text(new TextProps
+                    {
+                        Text = hint,
+                        FontSize = 11,
+                        Color = Color.FromHex("#94A3B8")
+                    })
+            ]
+        });
+    }
+
+    private static Element CreateToggleRow(string title, string subtitle, bool isOn, Action<bool> onToggle)
+    {
+        return Container(new ContainerProps
+        {
+            Direction = LayoutDirection.Horizontal,
+            AlignItems = AlignItems.Center,
+            Gap = 10,
+            Children =
+            [
+                Switch(new SwitchProps
+                {
+                    DefaultIsOn = isOn,
+                    Width = Dimension.Pixels(42),
+                    Height = Dimension.Pixels(24),
+                    OnColor = Color.FromHex("#2563EB"),
+                    OffColor = Color.FromHex("#CBD5E1"),
+                    ThumbColor = Color.White,
+                    OnToggle = onToggle
+                }),
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Vertical,
+                    Gap = 2,
+                    Children =
+                    [
+                        Text(new TextProps
+                        {
+                            Text = title,
+                            FontSize = 12,
+                            FontWeight = "Bold",
+                            Color = Color.FromHex("#0F172A")
+                        }),
+                        Text(new TextProps
+                        {
+                            Text = subtitle,
+                            FontSize = 11,
+                            Color = Color.FromHex("#94A3B8")
+                        })
+                    ]
+                })
+            ]
+        });
+    }
+
+    private static Element CreateModePill(string text, Color accentColor)
+    {
+        return Container(new ContainerProps
+        {
+            Direction = LayoutDirection.Horizontal,
+            AlignItems = AlignItems.Center,
+            Gap = 8,
+            BackgroundColor = accentColor.WithAlpha(24),
+            BorderWidth = 1,
+            BorderColor = accentColor.WithAlpha(80),
+            BorderRadius = 999,
+            Padding = new Spacing(Dimension.Pixels(12), Dimension.Pixels(8)),
+            Children =
+            [
+                Container(new ContainerProps
+                {
+                    Width = Dimension.Pixels(8),
+                    Height = Dimension.Pixels(8),
+                    BackgroundColor = accentColor,
+                    BorderRadius = 999
+                }),
+                Text(new TextProps
+                {
+                    Text = text,
+                    FontSize = 12,
+                    FontWeight = "Bold",
+                    Color = accentColor
                 })
             ]
         });

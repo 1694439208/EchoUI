@@ -8,7 +8,7 @@ using static EchoUI.Core.Elements;
 var syncCtx = new Win32SynchronizationContext();
 SynchronizationContext.SetSynchronizationContext(syncCtx);
 
-var window = new Win32Window("EchoUI Serial Tool", 1200, 800);
+var window = new Win32Window("EchoUI Serial Tool", 1600, 1100);
 window.Create();
 
 var renderer = new Win32Renderer(window);
