@@ -32,6 +32,11 @@ namespace EchoUI.Core
             return (T)_sharedStates[typeof(T)];
         }
 
+        internal TextMeasurementResult MeasureText(TextMeasurementRequest request)
+        {
+            return _renderer.MeasureText(request);
+        }
+
         public async Task Mount(Delegate rootComponentDelegate)
         {
             var methodInfo = rootComponentDelegate.Method;

@@ -149,6 +149,30 @@ namespace EchoUI.Render.Win32
                     _renderer?.HitTestManager.HandleKeyUp((int)wParam);
                     return 0;
 
+                case NativeInterop.WM_CHAR:
+                    _renderer?.HitTestManager.HandleTextInput((uint)wParam);
+                    return 0;
+
+                case NativeInterop.WM_IME_STARTCOMPOSITION:
+                    if (_renderer?.HitTestManager.FocusedElement != null)
+                        UpdateImePosition(_renderer.HitTestManager.FocusedElement);
+                    _renderer?.HitTestManager.HandleTextComposition(new TextCompositionEvent
+                    {
+                        Phase = TextCompositionPhase.Start
+                    });
+                    break;
+
+                case NativeInterop.WM_IME_COMPOSITION:
+                    OnImeComposition(hWnd, lParam);
+                    break;
+
+                case NativeInterop.WM_IME_ENDCOMPOSITION:
+                    _renderer?.HitTestManager.HandleTextComposition(new TextCompositionEvent
+                    {
+                        Phase = TextCompositionPhase.End
+                    });
+                    break;
+
                 case NativeInterop.WM_COMMAND:
                     OnCommand(wParam, lParam);
                     return 0;
@@ -196,6 +220,101 @@ namespace EchoUI.Render.Win32
             }
 
             return NativeInterop.DefWindowProc(hWnd, msg, wParam, lParam);
+        }
+
+        internal void UpdateImePosition(Win32Element? element)
+        {
+            if (_hwnd == 0 || element?.InputMethodAnchorPoint == null)
+                return;
+
+            var himc = NativeInterop.ImmGetContext(_hwnd);
+            if (himc == 0)
+                return;
+
+            try
+            {
+                var anchor = element.InputMethodAnchorPoint.Value;
+                var x = Math.Max(0, (int)Math.Round(element.AbsoluteX + anchor.X));
+                var y = Math.Max(0, (int)Math.Round(element.AbsoluteY + anchor.Y));
+                var point = new NativeInterop.POINT { X = x, Y = y };
+
+                var compositionForm = new NativeInterop.COMPOSITIONFORM
+                {
+                    dwStyle = NativeInterop.CFS_POINT | NativeInterop.CFS_FORCE_POSITION,
+                    ptCurrentPos = point
+                };
+                NativeInterop.ImmSetCompositionWindow(himc, ref compositionForm);
+
+                var candidateForm = new NativeInterop.CANDIDATEFORM
+                {
+                    dwIndex = 0,
+                    dwStyle = NativeInterop.CFS_CANDIDATEPOS,
+                    ptCurrentPos = point
+                };
+                NativeInterop.ImmSetCandidateWindow(himc, ref candidateForm);
+            }
+            finally
+            {
+                NativeInterop.ImmReleaseContext(_hwnd, himc);
+            }
+        }
+
+        private void OnImeComposition(nint hWnd, nint lParam)
+        {
+            if (_renderer == null)
+                return;
+
+            UpdateImePosition(_renderer.HitTestManager.FocusedElement);
+
+            var flags = unchecked((uint)lParam.ToInt64());
+            var hasResult = (flags & NativeInterop.GCS_RESULTSTR) != 0;
+
+            if (hasResult)
+            {
+                var resultText = GetImeCompositionString(hWnd, NativeInterop.GCS_RESULTSTR);
+                if (!string.IsNullOrEmpty(resultText))
+                {
+                    _renderer.HitTestManager.HandleTextComposition(new TextCompositionEvent
+                    {
+                        Phase = TextCompositionPhase.Commit,
+                        Text = resultText
+                    });
+                }
+            }
+
+            if (!hasResult && (flags & NativeInterop.GCS_COMPSTR) != 0)
+            {
+                _renderer.HitTestManager.HandleTextComposition(new TextCompositionEvent
+                {
+                    Phase = TextCompositionPhase.Update,
+                    Text = GetImeCompositionString(hWnd, NativeInterop.GCS_COMPSTR)
+                });
+            }
+        }
+
+        private static string GetImeCompositionString(nint hWnd, uint index)
+        {
+            var himc = NativeInterop.ImmGetContext(hWnd);
+            if (himc == 0)
+                return string.Empty;
+
+            try
+            {
+                var byteLength = NativeInterop.ImmGetCompositionStringW(himc, index, null, 0);
+                if (byteLength <= 0)
+                    return string.Empty;
+
+                var buffer = new byte[byteLength];
+                var actualLength = NativeInterop.ImmGetCompositionStringW(himc, index, buffer, buffer.Length);
+                if (actualLength <= 0)
+                    return string.Empty;
+
+                return System.Text.Encoding.Unicode.GetString(buffer, 0, actualLength);
+            }
+            finally
+            {
+                NativeInterop.ImmReleaseContext(hWnd, himc);
+            }
         }
 
         private void OnPaint(nint hWnd)

@@ -15,6 +15,16 @@
         public Dictionary<string, object?>? UpdatedProperties { get; set; }
     }
 
+    public record class TextMeasurementRequest
+    {
+        public string Text { get; init; } = "";
+        public string? FontFamily { get; init; }
+        public float? FontSize { get; init; }
+        public string? FontWeight { get; init; }
+    }
+
+    public readonly record struct TextMeasurementResult(float Width, float Height);
+
     public interface IRenderer
     {
         object CreateElement(string type);
@@ -30,6 +40,8 @@
         void AddChild(object parent, object child, int index);
         void RemoveChild(object parent, object child);
         void MoveChild(object parent, object child, int newIndex);
+
+        TextMeasurementResult MeasureText(TextMeasurementRequest request);
 
         IUpdateScheduler GetScheduler(object rootContainer);
     }

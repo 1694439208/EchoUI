@@ -71,6 +71,14 @@ namespace EchoUI.Render.Web
             DomInterop.MoveChild(parentId, childId, newIndex);
         }
 
+        public TextMeasurementResult MeasureText(TextMeasurementRequest request)
+        {
+            var text = request.Text ?? string.Empty;
+            var width = (float)DomInterop.MeasureText(text, request.FontFamily, request.FontSize ?? 14f, request.FontWeight);
+            var height = request.FontSize ?? 14f;
+            return new TextMeasurementResult(width, height);
+        }
+
         public void PatchProperties(object nativeElement, Props newProps, PropertyPatch patch)
         {
             var elementId = (string)nativeElement;
@@ -124,11 +132,21 @@ namespace EchoUI.Render.Web
                     domPatch.Attributes["data-eui-float-auto-width"] = containerProps.Float && !containerProps.Width.HasValue ? "true" : "false";
                     domPatch.Styles["flex-shrink"] = containerProps.FlexShrink.HasValue ? containerProps.FlexShrink.Value.ToString() : "0";
                     domPatch.Styles["flex-grow"] = containerProps.FlexGrow.HasValue ? containerProps.FlexGrow.Value.ToString() : "0";
+
+                    var hasImeHandler = containerProps.OnTextComposition != null;
+                    var hasKeyboardHandler = HasKeyboardHandler(containerProps);
+                    var requiresDomFocus = !hasImeHandler && (hasKeyboardHandler || containerProps.OnFocus != null || containerProps.OnBlur != null);
+                    domPatch.Attributes["data-eui-keyboard-handler"] = hasKeyboardHandler ? "true" : "false";
+                    domPatch.Attributes["data-eui-ime-handler"] = hasImeHandler ? "true" : "false";
+                    SetOptionalAttribute(domPatch, "data-eui-ime-x", containerProps.InputMethodAnchorPoint?.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    SetOptionalAttribute(domPatch, "data-eui-ime-y", containerProps.InputMethodAnchorPoint?.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    SetOptionalAttribute(domPatch, "tabindex", requiresDomFocus ? "0" : null);
+                    domPatch.Styles["outline"] = requiresDomFocus ? "none" : null;
                     break;
                 case TextProps textProps:
                     domPatch.Styles ??= new();
                     domPatch.Styles["user-select"] = "none";
-                    domPatch.Styles["white-space"] = "pre-wrap";
+                    domPatch.Styles["white-space"] = textProps.NoWrap ? "pre" : "pre-wrap";
                     domPatch.Styles["pointer-events"] = textProps.MouseThrough ? "none" : "auto";
                     break;
                 case InputProps inputProps:
@@ -238,6 +256,17 @@ namespace EchoUI.Render.Web
                         case nameof(ContainerProps.OnMouseUp): domPatch.UpdateEvent("mouseup", propValue); break;
                         case nameof(ContainerProps.OnKeyDown): domPatch.UpdateEvent("keydown", propValue); break;
                         case nameof(ContainerProps.OnKeyUp): domPatch.UpdateEvent("keyup", propValue); break;
+                        case nameof(ContainerProps.OnTextInput): domPatch.UpdateEvent("keypress", propValue); break;
+                        case nameof(ContainerProps.OnTextComposition): domPatch.UpdateEvent("textcomposition", propValue); break;
+                        case nameof(ContainerProps.InputMethodAnchorPoint):
+                            {
+                                var point = propValue as Point?;
+                                SetOptionalAttribute(domPatch, "data-eui-ime-x", point?.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                                SetOptionalAttribute(domPatch, "data-eui-ime-y", point?.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                                break;
+                            }
+                        case nameof(ContainerProps.OnFocus): domPatch.UpdateEvent("focus", propValue); break;
+                        case nameof(ContainerProps.OnBlur): domPatch.UpdateEvent("blur", propValue); break;
                         default:
                             break;
                     }
@@ -253,6 +282,7 @@ namespace EchoUI.Render.Web
                         case nameof(TextProps.FontWeight): domPatch.SetStyle("font-weight", propValue as string); break;
                         case nameof(TextProps.Color): domPatch.SetStyle("color", ToCss(propValue as Color?)); break;
                         case nameof(TextProps.MouseThrough): domPatch.SetStyle("pointer-events", (bool?)propValue == true ? "none" : "auto"); break;
+                        case nameof(TextProps.NoWrap): domPatch.SetStyle("white-space", (bool?)propValue == true ? "pre" : "pre-wrap"); break;
                         default:
                             break;
                     }
@@ -398,9 +428,14 @@ namespace EchoUI.Render.Web
             }
         }
 
+        private static bool HasKeyboardHandler(ContainerProps props)
+        {
+            return props.OnKeyDown != null || props.OnKeyUp != null || props.OnTextInput != null || props.OnTextComposition != null;
+        }
+
         private static bool IsNativeEventName(string propName) => propName switch
         {
-            "click" or "mousemove" or "mouseenter" or "mouseleave" or "mousedown" or "mouseup" or "keydown" or "keyup" or "input" => true,
+            "click" or "mousemove" or "mouseenter" or "mouseleave" or "mousedown" or "mouseup" or "keydown" or "keyup" or "keypress" or "textcomposition" or "focus" or "blur" or "input" => true,
             _ => false
         };
 
@@ -426,6 +461,10 @@ namespace EchoUI.Render.Web
                 UpdateHandler(elementId, "mouseleave", p.OnMouseLeave);
                 UpdateHandler(elementId, "keydown", p.OnKeyDown);
                 UpdateHandler(elementId, "keyup", p.OnKeyUp);
+                UpdateHandler(elementId, "keypress", p.OnTextInput);
+                UpdateHandler(elementId, "textcomposition", p.OnTextComposition);
+                UpdateHandler(elementId, "focus", p.OnFocus);
+                UpdateHandler(elementId, "blur", p.OnBlur);
             }
             else if (newProps is InputProps ip)
             {
@@ -586,6 +625,11 @@ namespace EchoUI.Render.Web
                     var keyCode = JsonSerializer.Deserialize<int>(eventArgsJson, WebRendererJsonContext.Default.Int32);
                     actionInt.Invoke(keyCode);
                     break;
+                case Action<TextCompositionEvent> actionComposition:
+                    var compositionEvent = JsonSerializer.Deserialize(eventArgsJson, WebRendererJsonContext.Default.TextCompositionEvent);
+                    if (compositionEvent != null)
+                        actionComposition.Invoke(compositionEvent);
+                    break;
             }
         }
     }
@@ -628,6 +672,7 @@ namespace EchoUI.Render.Web
     [JsonSerializable(typeof(Point))]
     [JsonSerializable(typeof(int))]
     [JsonSerializable(typeof(string))]
+    [JsonSerializable(typeof(TextCompositionEvent))]
     internal partial class WebRendererJsonContext : JsonSerializerContext
     {
     }
@@ -648,6 +693,9 @@ namespace EchoUI.Render.Web
 
         [JSImport("dom.moveChild", "dom")]
         internal static partial void MoveChild(string parentId, string childId, int newIndex);
+
+        [JSImport("dom.measureText", "dom")]
+        internal static partial double MeasureText(string text, string? fontFamily, float fontSize, string? fontWeight);
     }
 
     public class WebUpdateScheduler : IUpdateScheduler

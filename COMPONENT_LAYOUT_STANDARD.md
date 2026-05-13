@@ -5,7 +5,7 @@
 ## 1. 适用范围
 
 - 适用于 EchoUI 函数组件、组合控件、业务组件和 Web 渲染目标。
-- 核心布局统一使用 `Container`，文本统一使用 `Text`，输入统一使用 `Input`。
+- 核心布局统一使用 `Container`，文本统一使用 `Text`，单行输入统一使用 `Input` 或 `TextInput`。
 - 需要访问浏览器原生标签或非内置属性时使用 `Native`。
 - 本文档描述的是当前实现能力，不等同于完整 CSS/React 行为。
 
@@ -141,7 +141,7 @@ return Container([
         BorderWidth: 1,
         BorderColor: Color.Gray,
         Children: [
-            Input(
+            TextInput(
                 Value: name.Value,
                 OnValueChanged: value => setName(value)
             )
@@ -226,7 +226,8 @@ Container(
 
 ```text
 user-select: none
-white-space: pre-wrap
+white-space: pre-wrap // NoWrap = false 时
+white-space: pre      // NoWrap = true 时
 pointer-events: none // 默认 MouseThrough = true 时
 ```
 
@@ -237,6 +238,7 @@ pointer-events: none // 默认 MouseThrough = true 时
 - 所有文本必须用 `Text` 包裹。
 - 文本颜色、字号、字体粗细通过 `TextProps` 设置。
 - 不要把复杂布局写进字符串，换行文本可依赖 `white-space: pre-wrap`。
+- 单行文本应显式设置 `TextProps.NoWrap = true`。
 - `Text.MouseThrough` 默认是 `true`，Web 会映射为 `pointer-events: none`。
 
 示例：
@@ -252,7 +254,7 @@ Text(
 
 ### 3.3 Input
 
-`Input` 用于文本输入。Web 渲染器映射为 `input`，并默认应用：
+`Input` 是原生文本输入。Web 渲染器映射为 `input`，并默认应用：
 
 ```text
 width: 100%
@@ -286,6 +288,7 @@ border-radius: 0px
 - `Input` 必须作为受控输入使用：`Value` 与 `OnValueChanged` 成对出现。
 - 高度、宽度和复杂边框仍建议由外层 `Container` 承担。
 - 外层容器必须给定高度，否则 `input` 的 `height: 100%` 没有稳定参考。
+- 需要避免依赖原生 DOM input 时，应改用 `TextInput`。
 
 推荐：
 
@@ -427,6 +430,34 @@ RadioGroup(
 - 使用 `OnTabChanged` 接收切换结果。
 - `Titles` 当前会作为 header 和 panel 的 `Key`，标题必须唯一。
 - `Content` 函数应返回稳定结构，避免切换时重复创建不必要状态。
+
+### 4.7 TextInput
+
+`TextInput` 是非原生单行输入框，由 `Container + Text` 组合实现。
+
+当前能力：
+
+- 受控 `Value` / `OnValueChanged`。
+- `Placeholder`、`PlaceholderColor`。
+- `BackgroundColor`、`TextColor`、`BorderColor`、`FocusedBorderColor`、`CaretColor`。
+- `Width`、`Height`、`Padding`、`BorderRadius`。
+- `FontFamily`、`FontSize`、`FontWeight`。
+- 单行编辑、光标显示与闪烁、点击到字符级定位、`Backspace / Delete / ← / → / Home / End`。
+- 平台 IME 组合输入。
+
+标准要求：
+
+- `TextInput` 必须作为受控输入使用：`Value` 与 `OnValueChanged` 成对出现。
+- `TextInput` 内部文本必须保持单行，因此文本片段统一使用 `TextProps.NoWrap = true`。
+- `TextInput` 必须使用 renderer 级文本测量计算可见窗口，只渲染当前可见文本片段，不应把不可见全文本直接交给 `Text` 再依赖裁剪。
+- 容器仍必须使用 `Overflow.Hidden` 兜底裁剪，但不得出现换行。
+- `TextInput` 依赖 `ContainerProps.OnTextInput`、`OnTextComposition`、`OnFocus`、`OnBlur`、`OnKeyDown` 等事件。
+
+当前限制：
+
+- 暂不支持 IME、剪贴板、文本选区和点击到字符级定位。
+- 超宽内容当前改为基于 renderer 文本测量的可见窗口渲染，优先保证当前光标附近可见。
+- 当前可见窗口宽度仍以组件声明宽度为基准；像素宽度最准确，百分比/auto 宽度尚未接入提交后实际布局宽度。
 
 ## 5. 布局标准
 
@@ -654,6 +685,7 @@ Container(
 | `FontWeight` | `font-weight` |
 | `Color` | `color` |
 | `MouseThrough` | `pointer-events` |
+| `NoWrap` | `white-space: pre / pre-wrap` |
 
 ### 6.4 InputProps 到 CSS/DOM
 
@@ -727,12 +759,18 @@ Transitions: [
 | `OnMouseUp` | `mouseup` | `Action` |
 | `OnKeyDown` | `keydown` | `Action<int>` |
 | `OnKeyUp` | `keyup` | `Action<int>` |
+| `OnTextInput` | `keypress` | `Action<string>` |
+| `OnTextComposition` | 逻辑事件 | `Action<TextCompositionEvent>` |
+| `InputMethodAnchorPoint` | 属性映射 | `Point?` |
+| `OnFocus` | `focus` | `Action` |
+| `OnBlur` | `blur` | `Action` |
 
 标准要求：
 
 - 点击事件使用 `_ => Handler()` 忽略鼠标按键时保持签名一致。
 - 鼠标移动只用于必要交互，避免高频更新造成重复渲染。
-- 键盘事件需要元素能获得浏览器焦点；当前标准组件未统一封装 focus 能力。
+- 绑定键盘或焦点事件的 `Container`，WebRenderer 会自动加 `tabindex=0` 以获得 DOM focus。
+- `OnTextInput` 当前映射为 `keypress`，用于接收已确认字符输入。
 
 ### 7.2 Input 事件
 
@@ -894,7 +932,7 @@ Container(
 - 横向布局显式设置 `Direction.Horizontal`。
 - 可滚动区域必须有明确高度和 `Overflow.Auto` / `Overflow.Scroll`。
 - 动态列表必须设置唯一稳定 `Key`。
-- `Input` 必须使用受控模式。
+- `Input` 与 `TextInput` 必须使用受控模式。
 - 下拉、浮层父级必须允许 `Overflow.Visible`。
 - 组合控件的选项文本或标题不要重复。
 
@@ -923,6 +961,7 @@ Container(
 - Web 调度器当前直接执行更新，未合并到 `requestAnimationFrame`。
 - `Transition` 的 C# 属性名到 CSS 属性名转换仍是白名单机制，未列出的属性不会生成 transition。
 - `TextProps` 未显式设置字体、字号、字重、颜色时，Web 端仍依赖宿主页面与浏览器默认值。
+- `TextInput` 已支持 IME 与字符级点击定位；当前仍缺少剪贴板、文本选区，以及 IME 候选窗对光标像素位置的精确跟随；可见窗口已基于 renderer 文本测量实现，但百分比/auto 宽度尚未接入提交后实际布局宽度。
 - `CheckBox`、`ComboBox`、`RadioGroup`、`Switch`、`Tabs` 更接近非受控组件，初始 Props 后续变化不会自动同步内部状态。
 
 ## 12. 新组件验收标准

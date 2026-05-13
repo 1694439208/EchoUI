@@ -93,9 +93,268 @@ function applyManagedInputBorder(element) {
     syncBorderColor();
 }
 
+function raiseLogicalEvent(elementId, eventName, eventArgs) {
+    if (!elementId || !window.EchoUIHelper?.RaiseEventAsync) {
+        return;
+    }
+
+    Promise.resolve(window.EchoUIHelper.RaiseEventAsync(elementId, eventName, JSON.stringify(eventArgs ?? {})))
+        .catch(error => console.error(`Error invoking .NET method for logical event '${eventName}' on element '${elementId}':`, error));
+}
+
+let textInputProxy = null;
+let activeTextInputTarget = null;
+let suppressNextProxyInput = false;
+
+function clearTextInputProxyValue() {
+    if (!textInputProxy) {
+        return;
+    }
+
+    textInputProxy.value = '';
+    textInputProxy.setSelectionRange(0, 0);
+}
+
+function syncTextInputProxyPosition(target) {
+    if (!textInputProxy || !target) {
+        return;
+    }
+
+    const rect = target.getBoundingClientRect();
+    const styles = window.getComputedStyle(target);
+    const imeXRaw = target.getAttribute('data-eui-ime-x');
+    const imeYRaw = target.getAttribute('data-eui-ime-y');
+    const imeX = imeXRaw === null ? null : parsePx(imeXRaw);
+    const imeY = imeYRaw === null ? null : parsePx(imeYRaw);
+    const fallbackX = parsePx(styles.paddingLeft) + 1;
+    const fallbackY = Math.max(0, rect.height / 2 - 1);
+    const left = rect.left + (imeX ?? fallbackX);
+    const top = rect.top + (imeY ?? fallbackY);
+
+    textInputProxy.style.left = `${Math.round(left)}px`;
+    textInputProxy.style.top = `${Math.round(top)}px`;
+    textInputProxy.style.fontFamily = styles.fontFamily;
+    textInputProxy.style.fontSize = styles.fontSize;
+    textInputProxy.style.fontWeight = styles.fontWeight;
+    textInputProxy.style.lineHeight = styles.lineHeight;
+}
+
+function deactivateTextInputProxy(shouldBlurTarget) {
+    if (!textInputProxy) {
+        return;
+    }
+
+    const previousTarget = activeTextInputTarget;
+    activeTextInputTarget = null;
+    suppressNextProxyInput = false;
+    clearTextInputProxyValue();
+
+    if (document.activeElement === textInputProxy) {
+        textInputProxy.blur();
+    }
+
+    if (shouldBlurTarget && previousTarget?.__echoUiId) {
+        raiseLogicalEvent(previousTarget.__echoUiId, 'blur', {});
+    }
+}
+
+function ensureTextInputProxy() {
+    if (textInputProxy) {
+        return textInputProxy;
+    }
+
+    textInputProxy = document.createElement('textarea');
+    textInputProxy.setAttribute('aria-hidden', 'true');
+    textInputProxy.setAttribute('tabindex', '-1');
+    textInputProxy.setAttribute('autocomplete', 'off');
+    textInputProxy.setAttribute('autocorrect', 'off');
+    textInputProxy.setAttribute('autocapitalize', 'off');
+    textInputProxy.setAttribute('spellcheck', 'false');
+    textInputProxy.style.position = 'fixed';
+    textInputProxy.style.left = '-10000px';
+    textInputProxy.style.top = '-10000px';
+    textInputProxy.style.width = '1px';
+    textInputProxy.style.height = '1px';
+    textInputProxy.style.opacity = '0';
+    textInputProxy.style.pointerEvents = 'none';
+    textInputProxy.style.resize = 'none';
+    textInputProxy.style.border = '0';
+    textInputProxy.style.padding = '0';
+    textInputProxy.style.margin = '0';
+    textInputProxy.style.background = 'transparent';
+    textInputProxy.style.color = 'transparent';
+    textInputProxy.style.caretColor = 'transparent';
+    textInputProxy.style.outline = 'none';
+    textInputProxy.style.overflow = 'hidden';
+    document.body.appendChild(textInputProxy);
+
+    textInputProxy.addEventListener('keydown', (e) => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            return;
+        }
+
+        raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'keydown', e.keyCode);
+    });
+
+    textInputProxy.addEventListener('keyup', (e) => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            return;
+        }
+
+        raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'keyup', e.keyCode);
+    });
+
+    textInputProxy.addEventListener('compositionstart', () => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            return;
+        }
+
+        suppressNextProxyInput = false;
+        raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'textcomposition', { phase: 0, text: '' });
+    });
+
+    textInputProxy.addEventListener('compositionupdate', (e) => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            return;
+        }
+
+        raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'textcomposition', { phase: 1, text: e.data ?? '' });
+    });
+
+    textInputProxy.addEventListener('compositionend', (e) => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            return;
+        }
+
+        suppressNextProxyInput = true;
+        const committedText = e.data ?? '';
+        if (committedText.length > 0) {
+            raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'textcomposition', { phase: 2, text: committedText });
+        }
+        raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'textcomposition', { phase: 3, text: '' });
+        clearTextInputProxyValue();
+    });
+
+    textInputProxy.addEventListener('input', (e) => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            clearTextInputProxyValue();
+            return;
+        }
+
+        const inputText = e.data ?? textInputProxy.value ?? '';
+        if (suppressNextProxyInput) {
+            suppressNextProxyInput = false;
+            clearTextInputProxyValue();
+            return;
+        }
+
+        if (inputText.length > 0) {
+            raiseLogicalEvent(activeTextInputTarget.__echoUiId, 'keypress', inputText);
+        }
+
+        clearTextInputProxyValue();
+    });
+
+    textInputProxy.addEventListener('blur', () => {
+        if (!activeTextInputTarget?.__echoUiId) {
+            return;
+        }
+
+        const previousTargetId = activeTextInputTarget.__echoUiId;
+        activeTextInputTarget = null;
+        suppressNextProxyInput = false;
+        clearTextInputProxyValue();
+        raiseLogicalEvent(previousTargetId, 'blur', {});
+    });
+
+    document.addEventListener('mousedown', (e) => {
+        const imeTarget = e.target?.closest?.('[data-eui-ime-handler="true"]') ?? null;
+        if (imeTarget || !activeTextInputTarget) {
+            return;
+        }
+
+        deactivateTextInputProxy(true);
+    }, true);
+
+    window.addEventListener('resize', () => {
+        if (activeTextInputTarget) {
+            syncTextInputProxyPosition(activeTextInputTarget);
+        }
+    });
+
+    return textInputProxy;
+}
+
+function activateTextInputProxy(target) {
+    if (!target?.__echoUiId) {
+        return;
+    }
+
+    const proxy = ensureTextInputProxy();
+    const previousTarget = activeTextInputTarget;
+    if (previousTarget && previousTarget !== target && previousTarget.__echoUiId) {
+        raiseLogicalEvent(previousTarget.__echoUiId, 'blur', {});
+    }
+
+    activeTextInputTarget = target;
+    suppressNextProxyInput = false;
+    syncTextInputProxyPosition(target);
+    clearTextInputProxyValue();
+    proxy.focus({ preventScroll: true });
+
+    if (previousTarget !== target) {
+        raiseLogicalEvent(target.__echoUiId, 'focus', {});
+    }
+}
+
+function applyManagedKeyboardFocus(element) {
+    if (!element) {
+        return;
+    }
+
+    const hasKeyboardHandler = element.getAttribute('data-eui-keyboard-handler') === 'true';
+    const hasImeHandler = element.getAttribute('data-eui-ime-handler') === 'true';
+
+    if (element._managedListeners?.echoUiKeyboardFocus && (!hasKeyboardHandler || hasImeHandler)) {
+        element.removeEventListener('mousedown', element._managedListeners.echoUiKeyboardFocus.handler);
+        delete element._managedListeners.echoUiKeyboardFocus;
+    }
+
+    if (element._managedListeners?.echoUiImeFocus && !hasImeHandler) {
+        element.removeEventListener('mousedown', element._managedListeners.echoUiImeFocus.handler);
+        delete element._managedListeners.echoUiImeFocus;
+    }
+
+    if (activeTextInputTarget === element && !hasImeHandler) {
+        deactivateTextInputProxy(true);
+    }
+
+    if (hasImeHandler) {
+        ensureManagedListener(element, 'echoUiImeFocus', 'mousedown', (e) => {
+            e.preventDefault();
+            activateTextInputProxy(element);
+        });
+        return;
+    }
+
+    if (!hasKeyboardHandler) {
+        return;
+    }
+
+    ensureManagedListener(element, 'echoUiKeyboardFocus', 'mousedown', () => {
+        if (document.activeElement !== element) {
+            element.focus();
+        }
+    });
+}
+
 function cleanupSubtree(element) {
     if (!element) {
         return;
+    }
+
+    if (activeTextInputTarget && (element === activeTextInputTarget || element.contains(activeTextInputTarget))) {
+        deactivateTextInputProxy(true);
     }
 
     for (const child of Array.from(element.children)) {
@@ -246,6 +505,8 @@ async function handleEvent(e, elementId) {
         eventArgs = e.button;
     } else if (eventType === 'keydown' || eventType === 'keyup') {
         eventArgs = e.keyCode;
+    } else if (eventType === 'keypress') {
+        eventArgs = e.key;
     } else if (eventType === 'input') {
         eventArgs = e.target.value;
     }
@@ -259,6 +520,37 @@ async function handleEvent(e, elementId) {
 
 function getElement(elementId) {
     return elementRegistry.get(elementId) || document.getElementById(elementId);
+}
+
+const textMeasureCanvas = document.createElement('canvas');
+const textMeasureContext = textMeasureCanvas.getContext('2d');
+
+function normalizeFontFamily(fontFamily) {
+    if (!fontFamily || fontFamily.trim().length === 0) {
+        return 'sans-serif';
+    }
+
+    return fontFamily
+        .split(',')
+        .map(part => {
+            const trimmed = part.trim();
+            if (trimmed.length === 0) {
+                return trimmed;
+            }
+
+            if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+                return trimmed;
+            }
+
+            return trimmed.includes(' ') ? `"${trimmed.replaceAll('"', '\\"')}"` : trimmed;
+        })
+        .join(', ');
+}
+
+function buildCanvasFont(fontFamily, fontSize, fontWeight) {
+    const resolvedSize = Number.isFinite(fontSize) ? fontSize : 14;
+    const resolvedWeight = fontWeight && fontWeight.trim().length > 0 ? fontWeight : '400';
+    return `${resolvedWeight} ${resolvedSize}px ${normalizeFontFamily(fontFamily)}`;
 }
 
 export const dom = {
@@ -337,6 +629,10 @@ export const dom = {
         }
 
         applyManagedInputBorder(el);
+        applyManagedKeyboardFocus(el);
+        if (activeTextInputTarget === el) {
+            syncTextInputProxyPosition(el);
+        }
         scheduleFloatLayout(el);
     },
 
@@ -372,5 +668,14 @@ export const dom = {
             parent.insertBefore(child, referenceNode);
             scheduleFloatLayout(parent);
         }
+    },
+
+    measureText: (text, fontFamily, fontSize, fontWeight) => {
+        if (!textMeasureContext) {
+            return 0;
+        }
+
+        textMeasureContext.font = buildCanvasFont(fontFamily, fontSize, fontWeight);
+        return textMeasureContext.measureText(text ?? '').width;
     }
 };

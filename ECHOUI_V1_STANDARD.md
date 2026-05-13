@@ -65,7 +65,7 @@ EchoUI V1 的目标是提供一组最小但完整的声明式 UI 标准：
 
 - 常规布局必须使用 Container。
 - 常规文本必须使用 Text。
-- 常规文本输入必须使用 Input。
+- 常规单行文本输入必须使用 Input 或 TextInput。
 - 只有平台专属能力无法用标准元素表达时，才使用 Native / PlatformNative 逃生口。
 
 ### 3.3 最小核心，组合扩展
@@ -75,7 +75,7 @@ EchoUI V1 只内置少量基础元素。复杂控件应该通过组合构建。
 标准要求：
 
 - 标准组件不得要求渲染器新增专用原生控件才能工作。
-- 标准组件应可由 Container、Text、Input 和事件系统组合实现。
+- 标准组件应可由 Container、Text、Input 和标准事件系统组合实现；单行自绘输入可以由 Container 与 Text 组合为 TextInput。
 - 渲染器可以对标准组件做平台优化，但优化不得改变组件语义。
 
 ### 3.4 可降级能力
@@ -292,6 +292,10 @@ Container 是 EchoUI V1 的唯一标准布局容器。
 | OnMouseUp | none | 指针释放。 |
 | OnKeyDown | KeyCode | 键盘按下。 |
 | OnKeyUp | KeyCode | 键盘释放。 |
+| OnTextInput | string | 已确认的文本输入。 |
+| OnTextComposition | TextCompositionEvent | 输入法组合输入事件。 |
+| OnFocus | none | 元素获得键盘焦点。 |
+| OnBlur | none | 元素失去键盘焦点。 |
 
 标准要求：
 
@@ -301,6 +305,7 @@ Container 是 EchoUI V1 的唯一标准布局容器。
 - `FlexGrow > 0` 且主轴尺寸未设置时，基础尺寸仍为内容固有尺寸；等分列/行必须显式设置主轴尺寸为 `Dimension.ZeroPixels`。
 - 需要交叉轴填满时必须显式设置 AlignItems.Stretch 或子元素 100% 尺寸；渲染器不得依赖 Web CSS 默认 stretch。
 - 可滚动区域必须同时具备明确尺寸和 Overflow Scroll/Auto。
+- 绑定 `OnKeyDown`、`OnKeyUp`、`OnTextInput`、`OnFocus` 或 `OnBlur` 的 Container 必须可获得键盘焦点。
 - Float 不得用于普通文档流布局，只用于浮层、下拉和悬浮菜单。
 
 ### 6.2 Text
@@ -323,16 +328,18 @@ Text 是 EchoUI V1 的标准文本元素。
 | FontWeight | string/number | 平台默认字重。 |
 | Color | Color | 平台默认文本色。 |
 | MouseThrough | boolean | true。 |
+| NoWrap | boolean | false；允许按平台默认文本换行语义布局。 |
 
 标准要求：
 
 - 所有常规文本必须使用 Text。
 - Text 不应该承载复杂布局。
 - 多段内容应该由多个 Text 或 Container 组合表达。
+- 单行文本场景应该显式设置 `NoWrap = true`。
 
 ### 6.3 Input
 
-Input 是 EchoUI V1 的标准单行文本输入元素。
+Input 是 EchoUI V1 的标准原生单行文本输入元素。
 
 职责：
 
@@ -357,6 +364,7 @@ Input 是 EchoUI V1 的标准单行文本输入元素。
 - Input 在 V1 中必须按受控输入使用：Value 与 OnValueChanged 应成对出现。
 - 用户输入不得直接修改业务状态；必须通过 OnValueChanged 交给上层更新。
 - 输入框外部布局、尺寸和复杂边框可以由外层 Container 承担。
+- 需要完全由标准元素组合、避免依赖平台原生输入控件时，应该使用 TextInput。
 
 ### 6.4 Native / PlatformNative
 
@@ -550,6 +558,51 @@ V1 状态语义：
 - InitialIndex 表示初始标签索引。
 - Titles 在 V1 中必须唯一。
 - Content 应返回稳定结构，避免切换标签时意外丢失业务状态。
+
+### 7.7 TextInput
+
+TextInput 是标准的非原生单行文本输入组件。
+
+行为：
+
+- 展示当前文本值或占位文本。
+- 点击后获得焦点并显示插入光标。
+- 焦点期间插入光标应可闪烁；用户输入、点击或移动光标后应重置闪烁周期。
+- 接收文本输入并通过变更事件通知外部。
+- 支持单行编辑、左右移动、Home、End、Backspace 与 Delete。
+- 支持通过 `OnTextComposition` 表达平台 IME 的 Start / Update / Commit / End 生命周期。
+- 默认由 Container、Text 与标准焦点/键盘/文本组合输入事件组合实现。
+
+标准属性：
+
+| 属性 | 类型 | 默认语义 |
+|---|---|---|
+| Value | string | 空字符串。 |
+| Placeholder | string | 空字符串。 |
+| OnValueChanged | callback<string> | 文本变化回调。 |
+| Width | Dimension | 约 200px。 |
+| Height | Dimension | 约 36px。 |
+| BackgroundColor | Color | White。 |
+| TextColor | Color | Black。 |
+| PlaceholderColor | Color | Gray。 |
+| BorderColor | Color | `#d1d5db` 等价浅边框色。 |
+| FocusedBorderColor | Color | `#2563eb` 等价焦点边框色。 |
+| CaretColor | Color | 跟随文本色。 |
+| Padding | Spacing | 水平 10、垂直 6 的等价值。 |
+| BorderRadius | number | 4。 |
+| FontFamily | string | 跟随 Text 平台默认字体。 |
+| FontSize | number | 跟随 Text 平台默认字号。 |
+| FontWeight | string/number | 跟随 Text 平台默认字重。 |
+
+标准要求：
+
+- TextInput 在 V1 中必须按受控输入使用：Value 与 OnValueChanged 应成对出现。
+- TextInput 必须保持单行，不得因内容超宽而自动换行。
+- TextInput 的文本片段必须使用 `Text(NoWrap = true)` 或等价单行文本语义。
+- 渲染器必须提供文本测量或等价能力，用于计算当前可见文本窗口与光标位置。
+- 渲染器必须在内容超出宽度时裁剪、滚动或仅渲染可见片段，但不得改变单行语义。
+- 基础可编辑键包括字符输入、Backspace、Delete、Left、Right、Home、End。
+- V1 不强制 TextInput 支持 IME、剪贴板、文本选区、点击到字符级定位或多行编辑。
 
 ## 8. V1 布局标准
 
@@ -757,6 +810,10 @@ V1 标准组件使用以下可动画属性：
 | OnMouseUp | none | pressed 态结束。 |
 | OnKeyDown | KeyCode | 快捷键、输入辅助。 |
 | OnKeyUp | KeyCode | 键盘释放。 |
+| OnTextInput | string | 已确认文本输入。 |
+| OnTextComposition | TextCompositionEvent | IME 组合输入生命周期。 |
+| OnFocus | none | 焦点进入。 |
+| OnBlur | none | 焦点离开。 |
 | OnValueChanged | string | 文本输入变化。 |
 | OnToggle | boolean | CheckBox、Switch 状态变化。 |
 | OnSelectionChanged | number | RadioGroup、ComboBox 选中项变化。 |
@@ -769,6 +826,7 @@ V1 标准状态语义：
 | 组件 | V1 状态模式 |
 |---|---|
 | Input | 受控。Value 由外部提供，OnValueChanged 通知外部。 |
+| TextInput | 受控。Value 由外部提供，OnValueChanged 通知外部。 |
 | Button | 无业务状态，仅内部交互态。 |
 | CheckBox | 非受控。IsChecked 为初始值。 |
 | RadioGroup | 非受控。SelectedIndex 为初始值。 |

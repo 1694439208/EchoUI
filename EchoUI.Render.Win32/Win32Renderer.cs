@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Diagnostics;
 using EchoUI.Core;
 
@@ -31,10 +33,27 @@ namespace EchoUI.Render.Win32
         private bool _suppressEditNotification;
         private bool _disposed;
         private readonly HashSet<string> _nativeDiagnostics = [];
+        private static readonly Bitmap _measureBitmap = new(1, 1);
+        private static readonly Graphics _measureGraphics;
+        private static readonly StringFormat _measureStringFormat;
 
         internal Win32Element? RootElement => _rootElement;
         internal Win32UpdateScheduler? Scheduler => _scheduler;
         internal HitTestManager HitTestManager => _hitTestManager!;
+
+        static Win32Renderer()
+        {
+            _measureGraphics = Graphics.FromImage(_measureBitmap);
+            _measureGraphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            _measureGraphics.SmoothingMode = SmoothingMode.AntiAlias;
+            _measureStringFormat = new StringFormat
+            {
+                Alignment = StringAlignment.Near,
+                LineAlignment = StringAlignment.Near,
+                Trimming = StringTrimming.None,
+                FormatFlags = StringFormatFlags.MeasureTrailingSpaces
+            };
+        }
 
         public Win32Renderer(Win32Window window)
         {
@@ -88,6 +107,7 @@ namespace EchoUI.Render.Win32
                     break;
                 case TextProps p:
                     element.MouseThrough = p.MouseThrough;
+                    element.NoWrap = p.NoWrap;
                     break;
             }
 
@@ -165,6 +185,21 @@ namespace EchoUI.Render.Win32
                 parentElement.Children.Add(childElement);
 
 
+        }
+
+        public TextMeasurementResult MeasureText(TextMeasurementRequest request)
+        {
+            var text = request.Text ?? string.Empty;
+            var fontSize = request.FontSize ?? 14f;
+            var fontStyle = ResolveFontStyle(request.FontWeight);
+            var fontFamily = ResolveFontFamily(request.FontFamily, text);
+
+            lock (_measureGraphics)
+            {
+                using var font = new Font(fontFamily, fontSize, fontStyle, GraphicsUnit.Pixel);
+                var size = _measureGraphics.MeasureString(text, font, new PointF(0, 0), _measureStringFormat);
+                return new TextMeasurementResult(size.Width, size.Height);
+            }
         }
 
         public IUpdateScheduler GetScheduler(object rootContainer)
@@ -252,6 +287,11 @@ namespace EchoUI.Render.Win32
                 case nameof(ContainerProps.BorderRadius):
                     element.BorderRadius = propValue is float br ? br : 0;
                     break;
+                case nameof(ContainerProps.InputMethodAnchorPoint):
+                    element.InputMethodAnchorPoint = propValue is Core.Point point ? point : null;
+                    if (element.IsFocused)
+                        _window.UpdateImePosition(element);
+                    break;
 
                 // 事件由 UpdateEventHandlers 处理
                 // Transitions 在 Win32 下暂不支持动画，直接忽略
@@ -279,6 +319,9 @@ namespace EchoUI.Render.Win32
                     break;
                 case nameof(TextProps.MouseThrough):
                     element.MouseThrough = propValue is not false;
+                    break;
+                case nameof(TextProps.NoWrap):
+                    element.NoWrap = propValue is true;
                     break;
             }
         }
@@ -385,6 +428,10 @@ namespace EchoUI.Render.Win32
                     element.OnMouseUp = p.OnMouseUp;
                     element.OnKeyDown = p.OnKeyDown;
                     element.OnKeyUp = p.OnKeyUp;
+                    element.OnTextInput = p.OnTextInput;
+                    element.OnTextComposition = p.OnTextComposition;
+                    element.OnFocus = p.OnFocus;
+                    element.OnBlur = p.OnBlur;
                     break;
                 case InputProps ip:
                     element.OnValueChanged = ip.OnValueChanged;
@@ -411,6 +458,10 @@ namespace EchoUI.Render.Win32
             element.OnMouseUp = null;
             element.OnKeyDown = null;
             element.OnKeyUp = null;
+            element.OnTextInput = null;
+            element.OnTextComposition = null;
+            element.OnFocus = null;
+            element.OnBlur = null;
             element.OnValueChanged = null;
         }
 
@@ -445,6 +496,18 @@ namespace EchoUI.Render.Win32
                 case "keyup" when value is Action<int> keyUpHandler:
                     element.OnKeyUp = keyUpHandler;
                     return;
+                case "keypress" when value is Action<string> textInputHandler:
+                    element.OnTextInput = textInputHandler;
+                    return;
+                case "textcomposition" when value is Action<TextCompositionEvent> textCompositionHandler:
+                    element.OnTextComposition = textCompositionHandler;
+                    return;
+                case "focus" when value is Action focusHandler:
+                    element.OnFocus = focusHandler;
+                    return;
+                case "blur" when value is Action blurHandler:
+                    element.OnBlur = blurHandler;
+                    return;
                 case "input" when value is Action<string> inputHandler:
                     element.OnValueChanged = inputHandler;
                     return;
@@ -452,6 +515,31 @@ namespace EchoUI.Render.Win32
                     ReportNativeDiagnostic($"[EchoUI.Win32] Native event '{eventName}' is not supported.");
                     return;
             }
+        }
+
+        private static string ResolveFontFamily(string? fontFamily, string? text)
+        {
+            if (!string.IsNullOrWhiteSpace(fontFamily))
+                return fontFamily;
+
+            return IsLikelyEmojiOrSymbol(text) ? "Segoe UI Emoji" : "Segoe UI";
+        }
+
+        private static bool IsLikelyEmojiOrSymbol(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            foreach (var c in text)
+            {
+                if (char.IsSurrogate(c))
+                    return true;
+
+                if (c >= 0x2000 && c <= 0x33FF)
+                    return true;
+            }
+
+            return false;
         }
 
         [Conditional("DEBUG")]
@@ -722,6 +810,12 @@ namespace EchoUI.Render.Win32
                     CollectFloatingElementsRecursive(child);
                 }
             }
+        }
+
+        internal void FocusWindow()
+        {
+            if (_window.Hwnd != 0)
+                NativeInterop.SetFocus(_window.Hwnd);
         }
 
         /// <summary>

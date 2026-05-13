@@ -604,6 +604,12 @@ namespace EchoUI.Render.Win32
 
                 using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
 
+                if (element.NoWrap)
+                {
+                    var singleLineSize = _measureGraphics.MeasureString(element.Text, font, new PointF(0, 0), _defaultStringFormat);
+                    return singleLineSize.Height;
+                }
+
                 // 如果有宽度约束，传入宽度；否则传入虽大宽度
                 float maxWidth = widthConstraint > 0 ? widthConstraint : 100000f;
                 var size = _measureGraphics.MeasureString(element.Text, font, (int)Math.Ceiling(maxWidth), _defaultStringFormat);

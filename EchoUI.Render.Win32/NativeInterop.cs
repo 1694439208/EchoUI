@@ -25,6 +25,9 @@ namespace EchoUI.Render.Win32
         public const uint WM_KEYDOWN = 0x0100;
         public const uint WM_KEYUP = 0x0101;
         public const uint WM_CHAR = 0x0102;
+        public const uint WM_IME_STARTCOMPOSITION = 0x010D;
+        public const uint WM_IME_ENDCOMPOSITION = 0x010E;
+        public const uint WM_IME_COMPOSITION = 0x010F;
         public const uint WM_SETFOCUS = 0x0007;
         public const uint WM_KILLFOCUS = 0x0008;
         public const uint WM_TIMER = 0x0113;
@@ -58,6 +61,13 @@ namespace EchoUI.Render.Win32
         // --- Edit 控件样式 ---
         public const uint ES_AUTOHSCROLL = 0x0080;
         public const uint ES_LEFT = 0x0000;
+
+        // --- IME composition flags ---
+        public const uint GCS_COMPSTR = 0x0008;
+        public const uint GCS_RESULTSTR = 0x0800;
+        public const int CFS_POINT = 0x0002;
+        public const int CFS_FORCE_POSITION = 0x0020;
+        public const int CFS_CANDIDATEPOS = 0x0040;
 
         // --- 光标 ---
         public const int IDC_ARROW = 32512;
@@ -149,6 +159,23 @@ namespace EchoUI.Render.Win32
             public uint dwFlags;
             public nint hwndTrack;
             public uint dwHoverTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct COMPOSITIONFORM
+        {
+            public int dwStyle;
+            public POINT ptCurrentPos;
+            public RECT rcArea;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct CANDIDATEFORM
+        {
+            public uint dwIndex;
+            public int dwStyle;
+            public POINT ptCurrentPos;
+            public RECT rcArea;
         }
 
         // --- 委托 ---
@@ -279,5 +306,20 @@ namespace EchoUI.Render.Win32
 
         [DllImport("gdi32.dll")]
         public static extern bool DeleteObject(nint hObject);
+
+        [DllImport("imm32.dll")]
+        public static extern nint ImmGetContext(nint hWnd);
+
+        [DllImport("imm32.dll")]
+        public static extern bool ImmReleaseContext(nint hWnd, nint hIMC);
+
+        [DllImport("imm32.dll")]
+        public static extern int ImmGetCompositionStringW(nint hIMC, uint dwIndex, byte[]? lpBuf, int dwBufLen);
+
+        [DllImport("imm32.dll")]
+        public static extern bool ImmSetCompositionWindow(nint hIMC, ref COMPOSITIONFORM lpCompForm);
+
+        [DllImport("imm32.dll")]
+        public static extern bool ImmSetCandidateWindow(nint hIMC, ref CANDIDATEFORM lpCandidate);
     }
 }

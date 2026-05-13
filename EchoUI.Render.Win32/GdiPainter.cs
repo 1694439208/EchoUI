@@ -204,9 +204,8 @@ namespace EchoUI.Render.Win32
             var format = new StringFormat
             {
                 Alignment = StringAlignment.Near,
-
-                LineAlignment = StringAlignment.Near
-                // Allow wrapping by default
+                LineAlignment = StringAlignment.Near,
+                FormatFlags = element.NoWrap ? StringFormatFlags.NoWrap : 0
             };
 
             g.DrawString(element.Text, font, brush, bounds, format);

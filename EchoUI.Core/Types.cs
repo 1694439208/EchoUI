@@ -134,6 +134,20 @@ namespace EchoUI.Core
     /// </summary>
     public enum MouseButton { Left, Right, Middle }
 
+    public enum TextCompositionPhase
+    {
+        Start,
+        Update,
+        Commit,
+        End
+    }
+
+    public record class TextCompositionEvent
+    {
+        public TextCompositionPhase Phase { get; init; }
+        public string Text { get; init; } = string.Empty;
+    }
+
     /// <summary>
     /// A value-type wrapper for a dictionary that exposes its data
     /// as a list of key-value pairs.

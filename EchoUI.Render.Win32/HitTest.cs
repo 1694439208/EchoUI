@@ -12,6 +12,8 @@ namespace EchoUI.Render.Win32
         private Win32Element? _hoveredElement;
         private Win32Element? _pressedClickTarget;
         private Win32Element? _focusedElement;
+        private int _suppressedCommittedCharCount;
+        internal Win32Element? FocusedElement => _focusedElement;
         private readonly Win32Renderer _renderer;
 
 
@@ -168,12 +170,10 @@ namespace EchoUI.Render.Win32
             var hit = HitTest(root, x, y);
             _pressedClickTarget = FindHandler(hit, e => e.OnClick != null);
 
+            SetFocusedElement(FindFocusableElement(hit));
+
             if (hit != null)
             {
-                _focusedElement = hit;
-                if (hit.ElementType == ElementCoreName.Input && hit.EditHwnd != 0 && NativeInterop.IsWindow(hit.EditHwnd))
-                    NativeInterop.SetFocus(hit.EditHwnd);
-
                 var downTarget = FindHandler(hit, e => e.OnMouseDown != null);
                 downTarget?.OnMouseDown?.Invoke();
                 _renderer.RequestRepaint();
@@ -252,6 +252,30 @@ namespace EchoUI.Render.Win32
         }
 
         /// <summary>
+        /// 处理字符输入
+        /// </summary>
+        public void HandleTextInput(uint charCode)
+        {
+            if (_suppressedCommittedCharCount > 0 && charCode >= 32)
+            {
+                _suppressedCommittedCharCount--;
+                return;
+            }
+
+            _focusedElement?.OnTextInput?.Invoke(new string((char)charCode, 1));
+        }
+
+        public void HandleTextComposition(TextCompositionEvent compositionEvent)
+        {
+            if (compositionEvent.Phase == TextCompositionPhase.Commit && !string.IsNullOrEmpty(compositionEvent.Text))
+            {
+                _suppressedCommittedCharCount += compositionEvent.Text.Length;
+            }
+
+            _focusedElement?.OnTextComposition?.Invoke(compositionEvent);
+        }
+
+        /// <summary>
         /// 处理鼠标离开窗口
         /// </summary>
         public void HandleMouseLeave()
@@ -312,6 +336,60 @@ namespace EchoUI.Render.Win32
                 current = current.Parent;
             }
             return null;
+        }
+
+        private static Win32Element? FindFocusableElement(Win32Element? element)
+        {
+            return FindHandler(element, static e =>
+                e.ElementType == ElementCoreName.Input ||
+                e.OnKeyDown != null ||
+                e.OnKeyUp != null ||
+                e.OnTextInput != null ||
+                e.OnTextComposition != null ||
+                e.OnFocus != null ||
+                e.OnBlur != null);
+        }
+
+        private void SetFocusedElement(Win32Element? element)
+        {
+            if (ReferenceEquals(_focusedElement, element))
+            {
+                if (element?.ElementType == ElementCoreName.Input && element.EditHwnd != 0 && NativeInterop.IsWindow(element.EditHwnd))
+                {
+                    NativeInterop.SetFocus(element.EditHwnd);
+                }
+                else if (element != null)
+                {
+                    _renderer.FocusWindow();
+                }
+                return;
+            }
+
+            if (_focusedElement != null)
+            {
+                _focusedElement.IsFocused = false;
+                _focusedElement.OnBlur?.Invoke();
+            }
+
+            _focusedElement = element;
+
+            if (_focusedElement != null)
+            {
+                _focusedElement.IsFocused = true;
+
+                if (_focusedElement.ElementType == ElementCoreName.Input && _focusedElement.EditHwnd != 0 && NativeInterop.IsWindow(_focusedElement.EditHwnd))
+                {
+                    NativeInterop.SetFocus(_focusedElement.EditHwnd);
+                }
+                else
+                {
+                    _renderer.FocusWindow();
+                }
+
+                _focusedElement.OnFocus?.Invoke();
+            }
+
+            _renderer.RequestRepaint();
         }
 
         private static Core.Point ToLocalPoint(Win32Element element, float x, float y)

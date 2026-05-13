@@ -73,9 +73,11 @@ namespace EchoUI.Render.Win32
         public Core.Color? TextColor { get; set; }
         public string? FontWeight { get; set; }
         public bool MouseThrough { get; set; } = true;
+        public bool NoWrap { get; set; }
 
         // --- Input 属性 ---
         public string? InputValue { get; set; }
+        public Core.Point? InputMethodAnchorPoint { get; set; }
         public nint EditHwnd { get; set; }
         public nint NativeFontHandle { get; set; }
         public nint NativeBrushHandle { get; set; }
@@ -89,6 +91,10 @@ namespace EchoUI.Render.Win32
         public Action? OnMouseUp { get; set; }
         public Action<int>? OnKeyDown { get; set; }
         public Action<int>? OnKeyUp { get; set; }
+        public Action<string>? OnTextInput { get; set; }
+        public Action<TextCompositionEvent>? OnTextComposition { get; set; }
+        public Action? OnFocus { get; set; }
+        public Action? OnBlur { get; set; }
         public Action<string>? OnValueChanged { get; set; }
 
         // --- 滚动 ---

@@ -452,18 +452,7 @@ namespace EchoUI.Demo
                                 Children = 
                                 [
                                     Label("Username"),
-                                    Container(new ContainerProps 
-                                    { 
-                                        Height = Dimension.Pixels(38),
-                                        BorderWidth = 1,
-                                        BorderStyle = BorderStyle.Solid,
-                                        BorderColor = Color.FromHex("#d1d5db"),
-                                        BorderRadius = 4,
-                                        Padding = new Spacing(Dimension.Pixels(8), Dimension.Pixels(4)),
-                                        Children = [
-                                            Input(new InputProps { Value = username.Value, OnValueChanged = v => setUsername(v) })
-                                        ]
-                                    }),
+                                    TextInput(new TextInputProps { Value = username.Value, OnValueChanged = v => setUsername(v) }),
 
                                     Label("Role"),
                                     ComboBox(new ComboBoxProps

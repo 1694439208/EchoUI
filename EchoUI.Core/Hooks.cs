@@ -46,6 +46,29 @@ namespace EchoUI.Core
         }
 
         /// <summary>
+        /// 通过当前渲染器测量文本尺寸。
+        /// </summary>
+        public static TextMeasurementResult MeasureText(TextMeasurementRequest request)
+        {
+            if (Context == null)
+                throw new InvalidOperationException("Hooks can only be called inside a component render.");
+
+            return Context.Instance.Reconciler.MeasureText(request);
+        }
+
+        /// <summary>
+        /// 创建一个可在事件回调中继续使用的文本测量委托。
+        /// </summary>
+        public static Func<TextMeasurementRequest, TextMeasurementResult> CreateTextMeasurer()
+        {
+            if (Context == null)
+                throw new InvalidOperationException("Hooks can only be called inside a component render.");
+
+            var reconciler = Context.Instance.Reconciler;
+            return request => reconciler.MeasureText(request);
+        }
+
+        /// <summary>
         /// 提供组件状态，返回当前值和两种更新方式。
         /// </summary>
         public static (Ref<T> Value, ValueSetter<T> SetValue, StateUpdater<T> UpdateValue) State<T>(T initialValue)

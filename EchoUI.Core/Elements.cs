@@ -128,6 +128,12 @@ namespace EchoUI.Core
         /// </summary>
         public Action<int>? OnKeyUp { get; init; }
 
+        public Action<string>? OnTextInput { get; init; }
+        public Action<TextCompositionEvent>? OnTextComposition { get; init; }
+        public Point? InputMethodAnchorPoint { get; init; }
+        public Action? OnFocus { get; init; }
+        public Action? OnBlur { get; init; }
+
         // --- 子元素布局与内边距 ---
         /// <summary>
         /// 子元素的布局方向（垂直或水平）。
@@ -188,6 +194,7 @@ namespace EchoUI.Core
         /// 设置为 true 时，该文本将不会拦截鼠标事件，事件会"穿透"到下层控件。
         /// </summary>
         public bool MouseThrough { get; set; } = true;
+        public bool NoWrap { get; init; } = false;
     }
 
     public partial class Elements
