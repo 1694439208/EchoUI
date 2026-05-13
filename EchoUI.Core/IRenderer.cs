@@ -42,6 +42,8 @@
         void MoveChild(object parent, object child, int newIndex);
 
         TextMeasurementResult MeasureText(TextMeasurementRequest request);
+        Task<string> ReadClipboardTextAsync();
+        Task WriteClipboardTextAsync(string text);
 
         IUpdateScheduler GetScheduler(object rootContainer);
     }

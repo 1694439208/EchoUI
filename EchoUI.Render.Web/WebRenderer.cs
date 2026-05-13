@@ -79,6 +79,16 @@ namespace EchoUI.Render.Web
             return new TextMeasurementResult(width, height);
         }
 
+        public Task<string> ReadClipboardTextAsync()
+        {
+            return DomInterop.ReadClipboardText();
+        }
+
+        public Task WriteClipboardTextAsync(string text)
+        {
+            return DomInterop.WriteClipboardText(text ?? string.Empty);
+        }
+
         public void PatchProperties(object nativeElement, Props newProps, PropertyPatch patch)
         {
             var elementId = (string)nativeElement;
@@ -138,6 +148,7 @@ namespace EchoUI.Render.Web
                     var requiresDomFocus = !hasImeHandler && (hasKeyboardHandler || containerProps.OnFocus != null || containerProps.OnBlur != null);
                     domPatch.Attributes["data-eui-keyboard-handler"] = hasKeyboardHandler ? "true" : "false";
                     domPatch.Attributes["data-eui-ime-handler"] = hasImeHandler ? "true" : "false";
+                    domPatch.Attributes["data-eui-suppress-context-menu"] = containerProps.SuppressContextMenu ? "true" : "false";
                     SetOptionalAttribute(domPatch, "data-eui-ime-x", containerProps.InputMethodAnchorPoint?.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
                     SetOptionalAttribute(domPatch, "data-eui-ime-y", containerProps.InputMethodAnchorPoint?.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
                     SetOptionalAttribute(domPatch, "tabindex", requiresDomFocus ? "0" : null);
@@ -249,22 +260,34 @@ namespace EchoUI.Render.Web
                         // --- Events ---
                         // Reconciler 保证只有在添加/移除时才会将事件属性放入 patch 中
                         case nameof(ContainerProps.OnClick): domPatch.UpdateEvent("click", propValue); break;
-                        case nameof(ContainerProps.OnMouseMove): domPatch.UpdateEvent("mousemove", propValue); break;
+                        case nameof(ContainerProps.OnMouseMove):
+                        case nameof(ContainerProps.OnPointerMove):
+                            domPatch.UpdateEvent("mousemove", HasMouseMoveHandler(containerProps) ? new object() : null);
+                            break;
                         case nameof(ContainerProps.OnMouseEnter): domPatch.UpdateEvent("mouseenter", propValue); break;
                         case nameof(ContainerProps.OnMouseLeave): domPatch.UpdateEvent("mouseleave", propValue); break;
-                        case nameof(ContainerProps.OnMouseDown): domPatch.UpdateEvent("mousedown", propValue); break;
-                        case nameof(ContainerProps.OnMouseUp): domPatch.UpdateEvent("mouseup", propValue); break;
+                        case nameof(ContainerProps.OnMouseDown):
+                        case nameof(ContainerProps.OnPointerDown):
+                            domPatch.UpdateEvent("mousedown", HasMouseDownHandler(containerProps) ? new object() : null);
+                            break;
+                        case nameof(ContainerProps.OnMouseUp):
+                        case nameof(ContainerProps.OnPointerUp):
+                            domPatch.UpdateEvent("mouseup", HasMouseUpHandler(containerProps) ? new object() : null);
+                            break;
                         case nameof(ContainerProps.OnKeyDown): domPatch.UpdateEvent("keydown", propValue); break;
                         case nameof(ContainerProps.OnKeyUp): domPatch.UpdateEvent("keyup", propValue); break;
                         case nameof(ContainerProps.OnTextInput): domPatch.UpdateEvent("keypress", propValue); break;
                         case nameof(ContainerProps.OnTextComposition): domPatch.UpdateEvent("textcomposition", propValue); break;
                         case nameof(ContainerProps.InputMethodAnchorPoint):
                             {
-                                var point = propValue as Point?;
+                                Point? point = propValue is Point value ? value : null;
                                 SetOptionalAttribute(domPatch, "data-eui-ime-x", point?.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
                                 SetOptionalAttribute(domPatch, "data-eui-ime-y", point?.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
                                 break;
                             }
+                        case nameof(ContainerProps.SuppressContextMenu):
+                            domPatch.SetAttribute("data-eui-suppress-context-menu", propValue is true ? "true" : "false");
+                            break;
                         case nameof(ContainerProps.OnFocus): domPatch.UpdateEvent("focus", propValue); break;
                         case nameof(ContainerProps.OnBlur): domPatch.UpdateEvent("blur", propValue); break;
                         default:
@@ -433,6 +456,21 @@ namespace EchoUI.Render.Web
             return props.OnKeyDown != null || props.OnKeyUp != null || props.OnTextInput != null || props.OnTextComposition != null;
         }
 
+        private static bool HasMouseDownHandler(ContainerProps props)
+        {
+            return props.OnMouseDown != null || props.OnPointerDown != null;
+        }
+
+        private static bool HasMouseMoveHandler(ContainerProps props)
+        {
+            return props.OnMouseMove != null || props.OnPointerMove != null;
+        }
+
+        private static bool HasMouseUpHandler(ContainerProps props)
+        {
+            return props.OnMouseUp != null || props.OnPointerUp != null;
+        }
+
         private static bool IsNativeEventName(string propName) => propName switch
         {
             "click" or "mousemove" or "mouseenter" or "mouseleave" or "mousedown" or "mouseup" or "keydown" or "keyup" or "keypress" or "textcomposition" or "focus" or "blur" or "input" => true,
@@ -454,9 +492,9 @@ namespace EchoUI.Render.Web
             if (newProps is ContainerProps p)
             {
                 UpdateHandler(elementId, "click", p.OnClick);
-                UpdateHandler(elementId, "mousemove", p.OnMouseMove);
-                UpdateHandler(elementId, "mousedown", p.OnMouseDown);
-                UpdateHandler(elementId, "mouseup", p.OnMouseUp);
+                UpdateHandler(elementId, "mousemove", CreateMouseMoveHandler(p));
+                UpdateHandler(elementId, "mousedown", CreateMouseDownHandler(p));
+                UpdateHandler(elementId, "mouseup", CreateMouseUpHandler(p));
                 UpdateHandler(elementId, "mouseenter", p.OnMouseEnter);
                 UpdateHandler(elementId, "mouseleave", p.OnMouseLeave);
                 UpdateHandler(elementId, "keydown", p.OnKeyDown);
@@ -486,6 +524,42 @@ namespace EchoUI.Render.Web
                     }
                 }
             }
+        }
+
+        private static Action<MouseEvent>? CreateMouseDownHandler(ContainerProps props)
+        {
+            if (props.OnMouseDown == null && props.OnPointerDown == null)
+                return null;
+
+            return mouseEvent =>
+            {
+                props.OnMouseDown?.Invoke();
+                props.OnPointerDown?.Invoke(mouseEvent);
+            };
+        }
+
+        private static Action<MouseEvent>? CreateMouseMoveHandler(ContainerProps props)
+        {
+            if (props.OnMouseMove == null && props.OnPointerMove == null)
+                return null;
+
+            return mouseEvent =>
+            {
+                props.OnMouseMove?.Invoke(mouseEvent.Position);
+                props.OnPointerMove?.Invoke(mouseEvent);
+            };
+        }
+
+        private static Action<MouseEvent>? CreateMouseUpHandler(ContainerProps props)
+        {
+            if (props.OnMouseUp == null && props.OnPointerUp == null)
+                return null;
+
+            return mouseEvent =>
+            {
+                props.OnMouseUp?.Invoke();
+                props.OnPointerUp?.Invoke(mouseEvent);
+            };
         }
 
         private void UpdateHandler(string elementId, string eventName, Delegate? handler)
@@ -617,6 +691,10 @@ namespace EchoUI.Render.Web
                     var point = JsonSerializer.Deserialize<Point>(eventArgsJson, WebRendererJsonContext.Default.Point);
                     actionPoint.Invoke(point);
                     break;
+                case Action<MouseEvent> actionMouseEvent:
+                    var mouseEvent = JsonSerializer.Deserialize<MouseEvent>(eventArgsJson, WebRendererJsonContext.Default.MouseEvent);
+                    actionMouseEvent.Invoke(mouseEvent);
+                    break;
                 case Action<MouseButton> actionMouse:
                     var button = JsonSerializer.Deserialize<int>(eventArgsJson, WebRendererJsonContext.Default.Int32);
                     actionMouse.Invoke(MapMouseButton(button));
@@ -670,6 +748,7 @@ namespace EchoUI.Render.Web
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(DomPropertyPatch))]
     [JsonSerializable(typeof(Point))]
+    [JsonSerializable(typeof(MouseEvent))]
     [JsonSerializable(typeof(int))]
     [JsonSerializable(typeof(string))]
     [JsonSerializable(typeof(TextCompositionEvent))]
@@ -696,6 +775,12 @@ namespace EchoUI.Render.Web
 
         [JSImport("dom.measureText", "dom")]
         internal static partial double MeasureText(string text, string? fontFamily, float fontSize, string? fontWeight);
+
+        [JSImport("dom.readClipboardText", "dom")]
+        internal static partial Task<string> ReadClipboardText();
+
+        [JSImport("dom.writeClipboardText", "dom")]
+        internal static partial Task WriteClipboardText(string text);
     }
 
     public class WebUpdateScheduler : IUpdateScheduler

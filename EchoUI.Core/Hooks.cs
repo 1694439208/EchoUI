@@ -68,6 +68,24 @@ namespace EchoUI.Core
             return request => reconciler.MeasureText(request);
         }
 
+        public static Func<Task<string>> CreateClipboardReaderAsync()
+        {
+            if (Context == null)
+                throw new InvalidOperationException("Hooks can only be called inside a component render.");
+
+            var reconciler = Context.Instance.Reconciler;
+            return () => reconciler.ReadClipboardTextAsync();
+        }
+
+        public static Func<string, Task> CreateClipboardWriterAsync()
+        {
+            if (Context == null)
+                throw new InvalidOperationException("Hooks can only be called inside a component render.");
+
+            var reconciler = Context.Instance.Reconciler;
+            return reconciler.WriteClipboardTextAsync;
+        }
+
         /// <summary>
         /// 提供组件状态，返回当前值和两种更新方式。
         /// </summary>

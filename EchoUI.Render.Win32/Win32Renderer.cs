@@ -202,6 +202,17 @@ namespace EchoUI.Render.Win32
             }
         }
 
+        public Task<string> ReadClipboardTextAsync()
+        {
+            return Task.FromResult(ReadClipboardText());
+        }
+
+        public Task WriteClipboardTextAsync(string text)
+        {
+            WriteClipboardText(text ?? string.Empty);
+            return Task.CompletedTask;
+        }
+
         public IUpdateScheduler GetScheduler(object rootContainer)
         {
             _scheduler = new Win32UpdateScheduler(_window.Hwnd);
@@ -422,6 +433,9 @@ namespace EchoUI.Render.Win32
                 case ContainerProps p:
                     element.OnClick = p.OnClick;
                     element.OnMouseMove = p.OnMouseMove;
+                    element.OnPointerDown = p.OnPointerDown;
+                    element.OnPointerMove = p.OnPointerMove;
+                    element.OnPointerUp = p.OnPointerUp;
                     element.OnMouseEnter = p.OnMouseEnter;
                     element.OnMouseLeave = p.OnMouseLeave;
                     element.OnMouseDown = p.OnMouseDown;
@@ -452,6 +466,9 @@ namespace EchoUI.Render.Win32
         {
             element.OnClick = null;
             element.OnMouseMove = null;
+            element.OnPointerDown = null;
+            element.OnPointerMove = null;
+            element.OnPointerUp = null;
             element.OnMouseEnter = null;
             element.OnMouseLeave = null;
             element.OnMouseDown = null;
@@ -477,6 +494,15 @@ namespace EchoUI.Render.Win32
                     return;
                 case "mousemove" when value is Action<Core.Point> mouseMoveHandler:
                     element.OnMouseMove = mouseMoveHandler;
+                    return;
+                case "mousedown" when value is Action<MouseEvent> pointerDownHandler:
+                    element.OnPointerDown = pointerDownHandler;
+                    return;
+                case "mousemove" when value is Action<MouseEvent> pointerMoveHandler:
+                    element.OnPointerMove = pointerMoveHandler;
+                    return;
+                case "mouseup" when value is Action<MouseEvent> pointerUpHandler:
+                    element.OnPointerUp = pointerUpHandler;
                     return;
                 case "mouseenter" when value is Action mouseEnterHandler:
                     element.OnMouseEnter = mouseEnterHandler;
@@ -514,6 +540,84 @@ namespace EchoUI.Render.Win32
                 default:
                     ReportNativeDiagnostic($"[EchoUI.Win32] Native event '{eventName}' is not supported.");
                     return;
+            }
+        }
+
+        private static string ReadClipboardText()
+        {
+            if (!NativeInterop.OpenClipboard(0))
+                return string.Empty;
+
+            try
+            {
+                if (!NativeInterop.IsClipboardFormatAvailable(NativeInterop.CF_UNICODETEXT))
+                    return string.Empty;
+
+                var handle = NativeInterop.GetClipboardData(NativeInterop.CF_UNICODETEXT);
+                if (handle == 0)
+                    return string.Empty;
+
+                var pointer = NativeInterop.GlobalLock(handle);
+                if (pointer == 0)
+                    return string.Empty;
+
+                try
+                {
+                    return Marshal.PtrToStringUni(pointer) ?? string.Empty;
+                }
+                finally
+                {
+                    NativeInterop.GlobalUnlock(handle);
+                }
+            }
+            finally
+            {
+                NativeInterop.CloseClipboard();
+            }
+        }
+
+        private static void WriteClipboardText(string text)
+        {
+            if (!NativeInterop.OpenClipboard(0))
+                return;
+
+            nint handle = 0;
+            try
+            {
+                NativeInterop.EmptyClipboard();
+
+                var normalizedText = text ?? string.Empty;
+                var bytes = System.Text.Encoding.Unicode.GetBytes(normalizedText + '\0');
+                handle = NativeInterop.GlobalAlloc(NativeInterop.GMEM_MOVEABLE, (nuint)bytes.Length);
+                if (handle == 0)
+                    return;
+
+                var pointer = NativeInterop.GlobalLock(handle);
+                if (pointer == 0)
+                    return;
+
+                try
+                {
+                    Marshal.Copy(bytes, 0, pointer, bytes.Length);
+                }
+                finally
+                {
+                    NativeInterop.GlobalUnlock(handle);
+                }
+
+                if (NativeInterop.SetClipboardData(NativeInterop.CF_UNICODETEXT, handle) != 0)
+                {
+                    handle = 0;
+                }
+            }
+            finally
+            {
+                if (handle != 0)
+                {
+                    NativeInterop.GlobalFree(handle);
+                }
+
+                NativeInterop.CloseClipboard();
             }
         }
 

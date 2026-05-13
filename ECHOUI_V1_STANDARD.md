@@ -286,6 +286,9 @@ Container 是 EchoUI V1 的唯一标准布局容器。
 |---|---|---|
 | OnClick | MouseButton | 点击完成。 |
 | OnMouseMove | Point | 指针在元素区域内移动。 |
+| OnPointerDown | MouseEvent | 带坐标与按键信息的按下事件。 |
+| OnPointerMove | MouseEvent | 带坐标与按键信息的移动事件。 |
+| OnPointerUp | MouseEvent | 带坐标与按键信息的释放事件。 |
 | OnMouseEnter | none | 指针进入元素区域。 |
 | OnMouseLeave | none | 指针离开元素区域。 |
 | OnMouseDown | none | 指针按下。 |
@@ -305,7 +308,7 @@ Container 是 EchoUI V1 的唯一标准布局容器。
 - `FlexGrow > 0` 且主轴尺寸未设置时，基础尺寸仍为内容固有尺寸；等分列/行必须显式设置主轴尺寸为 `Dimension.ZeroPixels`。
 - 需要交叉轴填满时必须显式设置 AlignItems.Stretch 或子元素 100% 尺寸；渲染器不得依赖 Web CSS 默认 stretch。
 - 可滚动区域必须同时具备明确尺寸和 Overflow Scroll/Auto。
-- 绑定 `OnKeyDown`、`OnKeyUp`、`OnTextInput`、`OnFocus` 或 `OnBlur` 的 Container 必须可获得键盘焦点。
+- 绑定 `OnKeyDown`、`OnKeyUp`、`OnTextInput`、`OnTextComposition`、`OnFocus` 或 `OnBlur` 的 Container 必须可获得键盘焦点。
 - Float 不得用于普通文档流布局，只用于浮层、下拉和悬浮菜单。
 
 ### 6.2 Text
@@ -570,6 +573,7 @@ TextInput 是标准的非原生单行文本输入组件。
 - 焦点期间插入光标应可闪烁；用户输入、点击或移动光标后应重置闪烁周期。
 - 接收文本输入并通过变更事件通知外部。
 - 支持单行编辑、左右移动、Home、End、Backspace 与 Delete。
+- 支持鼠标拖拽框选文本、右键菜单、复制、剪切、粘贴与全选。
 - 支持通过 `OnTextComposition` 表达平台 IME 的 Start / Update / Commit / End 生命周期。
 - 默认由 Container、Text 与标准焦点/键盘/文本组合输入事件组合实现。
 

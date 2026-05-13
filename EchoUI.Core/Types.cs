@@ -134,6 +134,8 @@ namespace EchoUI.Core
     /// </summary>
     public enum MouseButton { Left, Right, Middle }
 
+    public readonly record struct MouseEvent(Point Position, MouseButton Button);
+
     public enum TextCompositionPhase
     {
         Start,

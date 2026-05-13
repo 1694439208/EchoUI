@@ -100,6 +100,9 @@ namespace EchoUI.Core
         /// 鼠标移动事件，参数为鼠标在控件内的坐标。
         /// </summary>
         public Action<Point>? OnMouseMove { get; init; }
+        public Action<MouseEvent>? OnPointerDown { get; init; }
+        public Action<MouseEvent>? OnPointerMove { get; init; }
+        public Action<MouseEvent>? OnPointerUp { get; init; }
 
         /// <summary>
         /// 鼠标进入元素区域时触发。
@@ -131,6 +134,7 @@ namespace EchoUI.Core
         public Action<string>? OnTextInput { get; init; }
         public Action<TextCompositionEvent>? OnTextComposition { get; init; }
         public Point? InputMethodAnchorPoint { get; init; }
+        public bool SuppressContextMenu { get; init; } = false;
         public Action? OnFocus { get; init; }
         public Action? OnBlur { get; init; }
 

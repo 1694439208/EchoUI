@@ -12,6 +12,7 @@ namespace EchoUI.Render.Win32
         private Win32Element? _hoveredElement;
         private Win32Element? _pressedClickTarget;
         private Win32Element? _focusedElement;
+        private MouseButton? _pressedButton;
         private int _suppressedCommittedCharCount;
         internal Win32Element? FocusedElement => _focusedElement;
         private readonly Win32Renderer _renderer;
@@ -155,10 +156,12 @@ namespace EchoUI.Render.Win32
             }
 
             // 向上冒泡查找有 OnMouseMove 的元素
-            var moveTarget = FindHandler(hit, e => e.OnMouseMove != null);
+            var moveTarget = FindHandler(hit, e => e.OnMouseMove != null || e.OnPointerMove != null);
             if (moveTarget != null)
             {
-                moveTarget.OnMouseMove?.Invoke(ToLocalPoint(moveTarget, x, y));
+                var localPoint = ToLocalPoint(moveTarget, x, y);
+                moveTarget.OnMouseMove?.Invoke(localPoint);
+                moveTarget.OnPointerMove?.Invoke(new MouseEvent(localPoint, _pressedButton ?? MouseButton.Left));
             }
         }
 
@@ -168,14 +171,20 @@ namespace EchoUI.Render.Win32
         public void HandleMouseDown(Win32Element root, float x, float y, MouseButton button)
         {
             var hit = HitTest(root, x, y);
+            _pressedButton = button;
             _pressedClickTarget = FindHandler(hit, e => e.OnClick != null);
 
             SetFocusedElement(FindFocusableElement(hit));
 
             if (hit != null)
             {
-                var downTarget = FindHandler(hit, e => e.OnMouseDown != null);
-                downTarget?.OnMouseDown?.Invoke();
+                var downTarget = FindHandler(hit, e => e.OnMouseDown != null || e.OnPointerDown != null);
+                if (downTarget != null)
+                {
+                    var localPoint = ToLocalPoint(downTarget, x, y);
+                    downTarget.OnMouseDown?.Invoke();
+                    downTarget.OnPointerDown?.Invoke(new MouseEvent(localPoint, button));
+                }
                 _renderer.RequestRepaint();
             }
         }
@@ -189,8 +198,13 @@ namespace EchoUI.Render.Win32
 
             if (hit != null)
             {
-                var upTarget = FindHandler(hit, e => e.OnMouseUp != null);
-                upTarget?.OnMouseUp?.Invoke();
+                var upTarget = FindHandler(hit, e => e.OnMouseUp != null || e.OnPointerUp != null);
+                if (upTarget != null)
+                {
+                    var localPoint = ToLocalPoint(upTarget, x, y);
+                    upTarget.OnMouseUp?.Invoke();
+                    upTarget.OnPointerUp?.Invoke(new MouseEvent(localPoint, button));
+                }
 
                 var releaseClickTarget = FindHandler(hit, e => e.OnClick != null);
                 if (releaseClickTarget != null && ReferenceEquals(releaseClickTarget, _pressedClickTarget))
@@ -201,6 +215,7 @@ namespace EchoUI.Render.Win32
                 _renderer.RequestRepaint();
             }
 
+            _pressedButton = null;
             _pressedClickTarget = null;
         }
 

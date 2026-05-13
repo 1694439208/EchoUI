@@ -37,6 +37,16 @@ namespace EchoUI.Core
             return _renderer.MeasureText(request);
         }
 
+        internal Task<string> ReadClipboardTextAsync()
+        {
+            return _renderer.ReadClipboardTextAsync();
+        }
+
+        internal Task WriteClipboardTextAsync(string text)
+        {
+            return _renderer.WriteClipboardTextAsync(text);
+        }
+
         public async Task Mount(Delegate rootComponentDelegate)
         {
             var methodInfo = rootComponentDelegate.Method;

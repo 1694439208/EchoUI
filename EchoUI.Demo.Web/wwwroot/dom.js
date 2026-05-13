@@ -93,6 +93,27 @@ function applyManagedInputBorder(element) {
     syncBorderColor();
 }
 
+function applyManagedContextMenuSuppression(element) {
+    if (!element) {
+        return;
+    }
+
+    const suppressContextMenu = element.getAttribute('data-eui-suppress-context-menu') === 'true';
+
+    if (element._managedListeners?.echoUiSuppressContextMenu && !suppressContextMenu) {
+        element.removeEventListener('contextmenu', element._managedListeners.echoUiSuppressContextMenu.handler);
+        delete element._managedListeners.echoUiSuppressContextMenu;
+    }
+
+    if (!suppressContextMenu) {
+        return;
+    }
+
+    ensureManagedListener(element, 'echoUiSuppressContextMenu', 'contextmenu', (e) => {
+        e.preventDefault();
+    });
+}
+
 function raiseLogicalEvent(elementId, eventName, eventArgs) {
     if (!elementId || !window.EchoUIHelper?.RaiseEventAsync) {
         return;
@@ -630,6 +651,7 @@ export const dom = {
 
         applyManagedInputBorder(el);
         applyManagedKeyboardFocus(el);
+        applyManagedContextMenuSuppression(el);
         if (activeTextInputTarget === el) {
             syncTextInputProxyPosition(el);
         }
@@ -677,5 +699,19 @@ export const dom = {
 
         textMeasureContext.font = buildCanvasFont(fontFamily, fontSize, fontWeight);
         return textMeasureContext.measureText(text ?? '').width;
+    },
+
+    readClipboardText: async () => {
+        if (navigator.clipboard?.readText) {
+            return await navigator.clipboard.readText();
+        }
+
+        return '';
+    },
+
+    writeClipboardText: async (text) => {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text ?? '');
+        }
     }
 };

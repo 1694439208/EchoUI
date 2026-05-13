@@ -82,6 +82,8 @@ namespace EchoUI.Render.Win32
 
         // --- Virtual keys ---
         public const int VK_SHIFT = 0x10;
+        public const uint CF_UNICODETEXT = 13;
+        public const uint GMEM_MOVEABLE = 0x0002;
 
         // --- TrackMouseEvent ---
         public const uint TME_LEAVE = 0x00000002;
@@ -275,9 +277,39 @@ namespace EchoUI.Render.Win32
         [DllImport("user32.dll")]
         public static extern int SetWindowRgn(nint hWnd, nint hRgn, bool bRedraw);
 
+        [DllImport("user32.dll")]
+        public static extern bool OpenClipboard(nint hWndNewOwner);
+
+        [DllImport("user32.dll")]
+        public static extern bool CloseClipboard();
+
+        [DllImport("user32.dll")]
+        public static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll")]
+        public static extern nint GetClipboardData(uint uFormat);
+
+        [DllImport("user32.dll")]
+        public static extern nint SetClipboardData(uint uFormat, nint hMem);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsClipboardFormatAvailable(uint format);
+
         // --- Kernel32.dll ---
         [DllImport("kernel32.dll")]
         public static extern nint GetModuleHandle(string? lpModuleName);
+
+        [DllImport("kernel32.dll")]
+        public static extern nint GlobalAlloc(uint uFlags, nuint dwBytes);
+
+        [DllImport("kernel32.dll")]
+        public static extern nint GlobalLock(nint hMem);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool GlobalUnlock(nint hMem);
+
+        [DllImport("kernel32.dll")]
+        public static extern nint GlobalFree(nint hMem);
 
         // --- Gdi32.dll ---
         [DllImport("gdi32.dll")]

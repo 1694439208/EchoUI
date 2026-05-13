@@ -85,6 +85,9 @@ namespace EchoUI.Render.Win32
         // --- 事件处理器 ---
         public Action<MouseButton>? OnClick { get; set; }
         public Action<Core.Point>? OnMouseMove { get; set; }
+        public Action<MouseEvent>? OnPointerDown { get; set; }
+        public Action<MouseEvent>? OnPointerMove { get; set; }
+        public Action<MouseEvent>? OnPointerUp { get; set; }
         public Action? OnMouseEnter { get; set; }
         public Action? OnMouseLeave { get; set; }
         public Action? OnMouseDown { get; set; }

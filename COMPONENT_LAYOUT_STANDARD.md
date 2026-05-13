@@ -443,6 +443,7 @@ RadioGroup(
 - `Width`、`Height`、`Padding`、`BorderRadius`。
 - `FontFamily`、`FontSize`、`FontWeight`。
 - 单行编辑、光标显示与闪烁、点击到字符级定位、`Backspace / Delete / ← / → / Home / End`。
+- 鼠标拖拽框选、右键菜单、复制、剪切、粘贴、全选。
 - 平台 IME 组合输入。
 
 标准要求：
@@ -451,7 +452,7 @@ RadioGroup(
 - `TextInput` 内部文本必须保持单行，因此文本片段统一使用 `TextProps.NoWrap = true`。
 - `TextInput` 必须使用 renderer 级文本测量计算可见窗口，只渲染当前可见文本片段，不应把不可见全文本直接交给 `Text` 再依赖裁剪。
 - 容器仍必须使用 `Overflow.Hidden` 兜底裁剪，但不得出现换行。
-- `TextInput` 依赖 `ContainerProps.OnTextInput`、`OnTextComposition`、`OnFocus`、`OnBlur`、`OnKeyDown` 等事件。
+- `TextInput` 依赖 `ContainerProps.OnTextInput`、`OnTextComposition`、`OnPointerDown`、`OnPointerMove`、`OnPointerUp`、`OnFocus`、`OnBlur`、`OnKeyDown` 等事件。
 
 当前限制：
 
@@ -757,6 +758,9 @@ Transitions: [
 | `OnMouseLeave` | `mouseleave` | `Action` |
 | `OnMouseDown` | `mousedown` | `Action` |
 | `OnMouseUp` | `mouseup` | `Action` |
+| `OnPointerDown` | `mousedown` | `Action<MouseEvent>` |
+| `OnPointerMove` | `mousemove` | `Action<MouseEvent>` |
+| `OnPointerUp` | `mouseup` | `Action<MouseEvent>` |
 | `OnKeyDown` | `keydown` | `Action<int>` |
 | `OnKeyUp` | `keyup` | `Action<int>` |
 | `OnTextInput` | `keypress` | `Action<string>` |
