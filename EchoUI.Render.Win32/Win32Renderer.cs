@@ -19,8 +19,10 @@ namespace EchoUI.Render.Win32
         private Win32UpdateScheduler? _scheduler;
         private HitTestManager? _hitTestManager;
         private readonly List<Win32Element> _floatingElements = [];
+        private readonly Win32AnimationManager _animationManager;
 
         internal IReadOnlyList<Win32Element> FloatingElements => _floatingElements;
+        internal Win32AnimationManager AnimationManager => _animationManager;
 
         /// <summary>
         /// 所有 Input 元素的 Edit HWND → Win32Element 映射
@@ -59,6 +61,7 @@ namespace EchoUI.Render.Win32
         {
             _window = window;
             _hitTestManager = new HitTestManager(this);
+            _animationManager = new Win32AnimationManager(window, this);
             window.SetRenderer(this);
         }
 
@@ -90,6 +93,35 @@ namespace EchoUI.Render.Win32
 
             if (patch.UpdatedProperties == null) return;
 
+            // 1. 捕获动画属性的旧值
+            (string propName, object? oldValue)[]? animatedProps = null;
+            Transition[]? transitions = null;
+
+            if (newProps is ContainerProps containerProps)
+            {
+                var transData = containerProps.Transitions?.Data;
+                if (transData != null)
+                {
+                    var matched = new List<(string, object?)>();
+                    var matchedTrans = new List<Transition>();
+                    foreach (var kvp in transData)
+                    {
+                        if (patch.UpdatedProperties.ContainsKey(kvp.Key))
+                        {
+                            matched.Add((kvp.Key, Win32AnimationManager.GetPropertyValue(element, kvp.Key)));
+                            if (kvp.Value is Transition tr)
+                                matchedTrans.Add(tr);
+                        }
+                    }
+                    if (matched.Count > 0)
+                    {
+                        animatedProps = [.. matched];
+                        transitions = [.. matchedTrans];
+                    }
+                }
+            }
+
+            // 2. 应用属性变化
             foreach (var (propName, propValue) in patch.UpdatedProperties)
             {
                 ApplyProperty(element, newProps, propName, propValue);
@@ -111,13 +143,22 @@ namespace EchoUI.Render.Win32
                     break;
             }
 
+            // 3. 启动动画（从旧值 → 新值）
+            if (animatedProps != null && transitions != null)
+            {
+                for (int i = 0; i < animatedProps.Length; i++)
+                {
+                    var (propName, oldValue) = animatedProps[i];
+                    var newValue = Win32AnimationManager.GetPropertyValue(element, propName);
+                    _animationManager.StartAnimation(element, propName, oldValue, newValue, transitions[i]);
+                }
+            }
+
             // 同步 Input 的原生 Edit 控件
             if (element.ElementType == ElementCoreName.Input && element.EditHwnd != 0)
             {
                 SyncEditControl(element);
             }
-
-
         }
 
         public void AddChild(object parent, object child, int index)
@@ -305,7 +346,7 @@ namespace EchoUI.Render.Win32
                     break;
 
                 // 事件由 UpdateEventHandlers 处理
-                // Transitions 在 Win32 下暂不支持动画，直接忽略
+                // Transitions 由 PatchProperties 中的动画管理器处理
             }
         }
 
@@ -792,6 +833,8 @@ namespace EchoUI.Render.Win32
 
         private void ReleaseElementTree(Win32Element element)
         {
+            _animationManager.StopAnimationsForElement(element);
+
             foreach (var child in element.Children.ToArray())
             {
                 ReleaseElementTree(child);
