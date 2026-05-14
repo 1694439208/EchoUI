@@ -359,6 +359,12 @@ namespace EchoUI.Render.Win32
         [DllImport("user32.dll")]
         public static extern bool KillTimer(nint hWnd, nint uIDEvent);
 
+        [DllImport("winmm.dll")]
+        public static extern uint timeBeginPeriod(uint uPeriod);
+
+        [DllImport("winmm.dll")]
+        public static extern uint timeEndPeriod(uint uPeriod);
+
         [DllImport("user32.dll")]
         public static extern bool IsWindow(nint hWnd);
 

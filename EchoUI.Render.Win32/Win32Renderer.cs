@@ -846,6 +846,14 @@ namespace EchoUI.Render.Win32
             NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
         }
 
+        internal void RequestAnimationRelayout()
+        {
+            if (_rootElement == null || _window.Hwnd == 0) return;
+
+            _layoutValid = false;
+            NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+        }
+
         internal void RequestScrollReposition(Win32Element scrollTarget)
         {
             if (_rootElement == null || _window.Hwnd == 0)

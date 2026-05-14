@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
@@ -18,8 +19,9 @@ namespace EchoUI.Render.Win32
         private readonly List<ActiveAnimation> _animations = new();
         private nint _timerId;
         private bool _timerRunning;
+        private bool _timerResolutionRaised;
         private int _nextTimerId = 100;
-        private DateTime _lastTickTime;
+        private long _lastTickTimestamp;
 
         public Win32AnimationManager(Win32Window window, Win32Renderer renderer)
         {
@@ -109,9 +111,11 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public void OnTimerTick()
         {
-            var now = DateTime.UtcNow;
-            var deltaMs = _lastTickTime == default ? TimerIntervalMs : (now - _lastTickTime).TotalMilliseconds;
-            _lastTickTime = now;
+            var now = Stopwatch.GetTimestamp();
+            var deltaMs = _lastTickTimestamp == 0
+                ? TimerIntervalMs
+                : (now - _lastTickTimestamp) * 1000.0 / Stopwatch.Frequency;
+            _lastTickTimestamp = now;
 
             UpdateAnimations(deltaMs);
         }
@@ -121,30 +125,44 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public void ResetTickTime()
         {
-            _lastTickTime = default;
+            _lastTickTimestamp = 0;
         }
 
         // --- 内部实现 ---
 
         private void EnsureTimerRunning()
         {
-            if (!_timerRunning && _window.Hwnd != 0)
+            if (_timerRunning || _window.Hwnd == 0)
+                return;
+
+            if (!_timerResolutionRaised)
             {
-                _timerId = (nint)_nextTimerId++;
-                NativeInterop.SetTimer(_window.Hwnd, _timerId, TimerIntervalMs, 0);
-                _timerRunning = true;
-                ResetTickTime();
+                NativeInterop.timeBeginPeriod(1);
+                _timerResolutionRaised = true;
             }
+
+            _timerId = (nint)_nextTimerId++;
+            NativeInterop.SetTimer(_window.Hwnd, _timerId, TimerIntervalMs, 0);
+            _timerRunning = true;
+            ResetTickTime();
         }
 
         private void StopTimer()
         {
-            if (_timerRunning && _window.Hwnd != 0)
+            if (_timerRunning)
             {
-                NativeInterop.KillTimer(_window.Hwnd, _timerId);
+                if (_window.Hwnd != 0 && _timerId != 0)
+                    NativeInterop.KillTimer(_window.Hwnd, _timerId);
+
                 _timerRunning = false;
                 _timerId = 0;
-                _lastTickTime = default;
+                _lastTickTimestamp = 0;
+            }
+
+            if (_timerResolutionRaised)
+            {
+                NativeInterop.timeEndPeriod(1);
+                _timerResolutionRaised = false;
             }
         }
 
@@ -158,20 +176,20 @@ namespace EchoUI.Render.Win32
 
             bool anyUpdated = false;
             bool needsRelayout = false;
+            HashSet<Win32Element>? dirtyElements = null;
 
             for (int i = _animations.Count - 1; i >= 0; i--)
             {
                 var anim = _animations[i];
                 anim.ElapsedMs += deltaMs;
 
+                var isLayoutProperty = IsLayoutProperty(anim.PropertyName);
                 double t = anim.ElapsedMs / anim.DurationMs;
                 if (t >= 1.0)
                 {
-                    // 动画完成：直接设为目标值
                     SetElementProperty(anim.Element, anim.PropertyName, anim.ToValue);
                     _animations.RemoveAt(i);
                     anyUpdated = true;
-                    needsRelayout |= IsLayoutProperty(anim.PropertyName);
                 }
                 else
                 {
@@ -179,20 +197,34 @@ namespace EchoUI.Render.Win32
                     var current = Interpolate(anim.FromValue, anim.ToValue, easedT);
                     SetElementProperty(anim.Element, anim.PropertyName, current);
                     anyUpdated = true;
-                    needsRelayout |= IsLayoutProperty(anim.PropertyName);
+                }
+
+                if (isLayoutProperty)
+                {
+                    needsRelayout = true;
+                }
+                else
+                {
+                    dirtyElements ??= [];
+                    dirtyElements.Add(anim.Element);
                 }
             }
 
-            if (anyUpdated)
-            {
-                if (needsRelayout)
-                    _renderer.RequestRelayout();
-                else
-                    _renderer.RequestRepaint();
+            if (!anyUpdated)
+                return;
 
-                if (_animations.Count == 0)
-                    StopTimer();
+            if (needsRelayout)
+            {
+                _renderer.RequestAnimationRelayout();
             }
+            else if (dirtyElements != null)
+            {
+                foreach (var element in dirtyElements)
+                    _renderer.RequestRepaint(element);
+            }
+
+            if (_animations.Count == 0)
+                StopTimer();
         }
 
         // --- 插值函数 ---
