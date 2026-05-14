@@ -183,6 +183,10 @@ namespace EchoUI.Render.Win32
                     OnCommand(wParam, lParam);
                     return 0;
 
+                case NativeInterop.WM_TIMER:
+                    _renderer?.AnimationManager.OnTimerTick();
+                    return 0;
+
                 case NativeInterop.WM_ECHOUI_UPDATE:
                     OnEchoUIUpdate();
                     return 0;
