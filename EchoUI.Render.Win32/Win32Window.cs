@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Runtime.InteropServices;
 using EchoUI.Core;
 
@@ -15,11 +14,11 @@ namespace EchoUI.Render.Win32
         private readonly int _height;
         private Win32Renderer? _renderer;
         private bool _trackingMouse;
-
-        // 双缓冲 GDI 资源缓存，避免每帧分配
         private nint _backBufferDc;
         private nint _backBufferBitmap;
-        private nint _oldBackBufferBitmap;
+        private nint _backBufferOldBitmap;
+        private nint _backBufferBits;
+        private int _backBufferStride;
         private int _backBufferWidth;
         private int _backBufferHeight;
 
@@ -51,11 +50,11 @@ namespace EchoUI.Render.Win32
             var wc = new NativeInterop.WNDCLASSEX
             {
                 cbSize = Marshal.SizeOf<NativeInterop.WNDCLASSEX>(),
-                style = 0,
+                style = 0x0003, // CS_HREDRAW | CS_VREDRAW
                 lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate),
                 hInstance = hInstance,
                 hCursor = NativeInterop.LoadCursor(0, NativeInterop.IDC_ARROW),
-                hbrBackground = 0,
+                hbrBackground = NativeInterop.GetStockObject(NativeInterop.WHITE_BRUSH),
                 lpszClassName = "EchoUIWin32Class"
             };
 
@@ -184,10 +183,6 @@ namespace EchoUI.Render.Win32
                     OnCommand(wParam, lParam);
                     return 0;
 
-                case NativeInterop.WM_TIMER:
-                    _renderer?.AnimationManager.OnTimerTick();
-                    return 0;
-
                 case NativeInterop.WM_ECHOUI_UPDATE:
                     OnEchoUIUpdate();
                     return 0;
@@ -197,7 +192,7 @@ namespace EchoUI.Render.Win32
                     return 0;
 
                 case NativeInterop.WM_DESTROY:
-                    ReleaseBackBuffer();
+                    DisposeBackBuffer();
                     _renderer?.Dispose();
                     _renderer = null;
                     NativeInterop.PostQuitMessage(0);
@@ -222,9 +217,10 @@ namespace EchoUI.Render.Win32
                             NativeInterop.SetBkColor(hdc, crBk); // 需要 SetBkColor
                             
                             // 返回背景画刷，用于擦除背景
-                            if (element.NativeBrushHandle != 0)
-                                return element.NativeBrushHandle;
-                            
+                            var brush = GdiResourceCache.GetSolidBrush(crBk);
+                            if (brush != 0)
+                                return brush;
+
                             return NativeInterop.GetStockObject(NativeInterop.WHITE_BRUSH);
                         }
                     }
@@ -340,21 +336,32 @@ namespace EchoUI.Render.Win32
 
                 if (w > 0 && h > 0 && _renderer?.RootElement != null)
                 {
-                    // 确保布局已计算（仅在首次或尚未 layout 时）
-                    if (_renderer.RootElement.LayoutWidth <= 0)
+                    _renderer.EnsureLayout(w, h);
+
+                    var memoryDc = EnsureBackBuffer(ps.hdc, w, h, out var recreated);
+                    if (memoryDc != 0)
                     {
-                        FlexLayout.ComputeLayout(_renderer.RootElement, w, h);
-                        _renderer.UpdateAllEditPositions(w, h);
+                        var dirtyRect = recreated
+                            ? new RectF(0, 0, w, h)
+                            : new RectF(ps.rcPaint.Left, ps.rcPaint.Top, Math.Max(0, ps.rcPaint.Width), Math.Max(0, ps.rcPaint.Height));
+
+                        CpuBitmapSurface? bitmapSurface = _backBufferBits != 0
+                            ? new CpuBitmapSurface(_backBufferBits, w, h, _backBufferStride)
+                            : null;
+                        GdiPainter.Paint(memoryDc, _renderer.RootElement, _renderer.FloatingElements, w, h, dirtyRect, bitmapSurface);
+
+                        var nativeDirty = ToNativeRect(dirtyRect);
+                        NativeInterop.BitBlt(
+                            ps.hdc,
+                            nativeDirty.Left,
+                            nativeDirty.Top,
+                            Math.Max(0, nativeDirty.Width),
+                            Math.Max(0, nativeDirty.Height),
+                            memoryDc,
+                            nativeDirty.Left,
+                            nativeDirty.Top,
+                            NativeInterop.SRCCOPY);
                     }
-
-                    EnsureBackBuffer(ps.hdc, w, h);
-
-                    using (var g = Graphics.FromHdc(_backBufferDc))
-                    {
-                        GdiPainter.Paint(g, _renderer.RootElement, _renderer.FloatingElements, w, h);
-                    }
-
-                    NativeInterop.BitBlt(ps.hdc, 0, 0, w, h, _backBufferDc, 0, 0, NativeInterop.SRCCOPY);
                 }
             }
             finally
@@ -363,26 +370,71 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private void EnsureBackBuffer(nint paintDc, int width, int height)
+        private static NativeInterop.RECT ToNativeRect(RectF rect)
         {
-            if (_backBufferDc != 0 && _backBufferWidth == width && _backBufferHeight == height)
-                return;
-
-            ReleaseBackBuffer();
-
-            _backBufferDc = NativeInterop.CreateCompatibleDC(paintDc);
-            _backBufferBitmap = NativeInterop.CreateCompatibleBitmap(paintDc, width, height);
-            _oldBackBufferBitmap = NativeInterop.SelectObject(_backBufferDc, _backBufferBitmap);
-            _backBufferWidth = width;
-            _backBufferHeight = height;
+            return new NativeInterop.RECT
+            {
+                Left = (int)Math.Floor(rect.Left),
+                Top = (int)Math.Floor(rect.Top),
+                Right = (int)Math.Ceiling(rect.Right),
+                Bottom = (int)Math.Ceiling(rect.Bottom)
+            };
         }
 
-        private void ReleaseBackBuffer()
+        private nint EnsureBackBuffer(nint referenceDc, int width, int height, out bool recreated)
+        {
+            recreated = false;
+
+            if (_backBufferDc != 0 && _backBufferWidth == width && _backBufferHeight == height)
+                return _backBufferDc;
+
+            DisposeBackBuffer();
+            recreated = true;
+
+            var memoryDc = NativeInterop.CreateCompatibleDC(referenceDc);
+            if (memoryDc == 0)
+                return 0;
+
+            var stride = checked(width * sizeof(uint));
+            var bitmapInfo = new NativeInterop.BITMAPINFO
+            {
+                bmiHeader = new NativeInterop.BITMAPINFOHEADER
+                {
+                    biSize = (uint)Marshal.SizeOf<NativeInterop.BITMAPINFOHEADER>(),
+                    biWidth = width,
+                    biHeight = -height,
+                    biPlanes = 1,
+                    biBitCount = 32,
+                    biCompression = NativeInterop.BI_RGB,
+                    biSizeImage = (uint)checked(stride * height)
+                }
+            };
+
+            var bitmap = NativeInterop.CreateDIBSection(referenceDc, ref bitmapInfo, NativeInterop.DIB_RGB_COLORS, out var bits, 0, 0);
+            if (bitmap == 0 || bits == 0)
+            {
+                if (bitmap != 0)
+                    NativeInterop.DeleteObject(bitmap);
+                NativeInterop.DeleteDC(memoryDc);
+                return 0;
+            }
+
+            _backBufferOldBitmap = NativeInterop.SelectObject(memoryDc, bitmap);
+            _backBufferDc = memoryDc;
+            _backBufferBitmap = bitmap;
+            _backBufferBits = bits;
+            _backBufferStride = stride;
+            _backBufferWidth = width;
+            _backBufferHeight = height;
+            return _backBufferDc;
+        }
+
+        private void DisposeBackBuffer()
         {
             if (_backBufferDc != 0)
             {
-                if (_oldBackBufferBitmap != 0)
-                    NativeInterop.SelectObject(_backBufferDc, _oldBackBufferBitmap);
+                if (_backBufferOldBitmap != 0)
+                    NativeInterop.SelectObject(_backBufferDc, _backBufferOldBitmap);
 
                 if (_backBufferBitmap != 0)
                     NativeInterop.DeleteObject(_backBufferBitmap);
@@ -392,13 +444,16 @@ namespace EchoUI.Render.Win32
 
             _backBufferDc = 0;
             _backBufferBitmap = 0;
-            _oldBackBufferBitmap = 0;
+            _backBufferOldBitmap = 0;
+            _backBufferBits = 0;
+            _backBufferStride = 0;
             _backBufferWidth = 0;
             _backBufferHeight = 0;
         }
 
         private void OnResize(nint hWnd)
         {
+            DisposeBackBuffer();
             _renderer?.RequestRelayout();
         }
 

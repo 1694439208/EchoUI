@@ -1,6 +1,3 @@
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
@@ -13,31 +10,10 @@ namespace EchoUI.Render.Win32
     /// </summary>
     internal static class FlexLayout
     {
-        // 缓存用于测量的 Graphics 对象，避免重复创建带来的性能开销
-        private static readonly Bitmap _measureBitmap = new(1, 1);
-        private static readonly Graphics _measureGraphics;
-        private static readonly StringFormat _defaultStringFormat;
-
-        static FlexLayout()
-        {
-            _measureGraphics = Graphics.FromImage(_measureBitmap);
-            _measureGraphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            _measureGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-            // 保持与 GdiPainter 一致的 StringFormat 配置
-            _defaultStringFormat = new StringFormat
-            {
-                Alignment = StringAlignment.Near,
-                LineAlignment = StringAlignment.Near,
-                Trimming = StringTrimming.None, // 布局阶段不裁剪，由渲染阶段处理
-                FormatFlags = StringFormatFlags.MeasureTrailingSpaces // 测量包含尾部空格
-            };
-        }
-
         /// <summary>
         /// 从根元素开始计算整棵树的布局
         /// </summary>
-        public static void ComputeLayout(Win32Element root, float viewportWidth, float viewportHeight)
+        public static void ComputeLayout(Win32Element root, float viewportWidth, float viewportHeight, int measureCacheGeneration)
         {
             root.LayoutX = 0;
             root.LayoutY = 0;
@@ -45,12 +21,30 @@ namespace EchoUI.Render.Win32
             root.LayoutHeight = viewportHeight;
             root.AbsoluteX = 0;
             root.AbsoluteY = 0;
+            root.UpdateAbsoluteBounds();
 
-            LayoutChildren(root, viewportWidth, viewportHeight);
+            LayoutChildren(root, viewportWidth, viewportHeight, measureCacheGeneration);
 
             if (ClampScrollOffsetsRecursive(root, viewportWidth, viewportHeight))
             {
-                LayoutChildren(root, viewportWidth, viewportHeight);
+                LayoutChildren(root, viewportWidth, viewportHeight, measureCacheGeneration);
+            }
+        }
+
+        public static void UpdateAbsoluteLayout(Win32Element root)
+        {
+            root.UpdateAbsoluteBounds();
+            UpdateAbsoluteChildren(root);
+        }
+
+        private static void UpdateAbsoluteChildren(Win32Element container)
+        {
+            foreach (var child in container.Children)
+            {
+                child.AbsoluteX = container.AbsoluteX + child.LayoutX - container.ScrollOffsetX;
+                child.AbsoluteY = container.AbsoluteY + child.LayoutY - container.ScrollOffsetY;
+                child.UpdateAbsoluteBounds();
+                UpdateAbsoluteChildren(child);
             }
         }
 
@@ -92,12 +86,15 @@ namespace EchoUI.Render.Win32
             return changed;
         }
 
-        private static void LayoutChildren(Win32Element container, float vpW, float vpH)
+        private static void LayoutChildren(Win32Element container, float vpW, float vpH, int measureCacheGeneration)
         {
-            if (container.Children.Count == 0) return;
-
             var padding = ResolveSpacing(container.Padding, container.LayoutWidth, vpW, vpH);
             float border = GetBorderInset(container);
+            container.CachedContentWidth = padding.Left + padding.Right + border * 2;
+            container.CachedContentHeight = padding.Top + padding.Bottom + border * 2;
+
+            if (container.Children.Count == 0) return;
+
             float contentX = border + padding.Left;
             float contentY = border + padding.Top;
             float contentWidth = Math.Max(0, container.LayoutWidth - border * 2 - padding.Left - padding.Right);
@@ -107,6 +104,8 @@ namespace EchoUI.Render.Win32
             float mainSize = isRow ? contentWidth : contentHeight;
             float crossSize = isRow ? contentHeight : contentWidth;
             float gap = container.Gap;
+            float contentRight = border + padding.Left;
+            float contentBottom = border + padding.Top;
 
             // --- 第一遍：计算每个子元素的基础尺寸 ---
             var items = new List<FlexItem>(container.Children.Count);
@@ -138,8 +137,8 @@ namespace EchoUI.Render.Win32
                     
                     // 没有显式尺寸 → 测量内容固有尺寸
                     mainBase = isRow
-                        ? MeasureIntrinsicWidth(child, contentHeight, vpW, vpH)
-                        : MeasureIntrinsicHeight(child, contentWidth, vpW, vpH);
+                        ? MeasureIntrinsicWidth(child, contentHeight, vpW, vpH, measureCacheGeneration)
+                        : MeasureIntrinsicHeight(child, contentWidth, vpW, vpH, measureCacheGeneration);
                 }
 
                 // 交叉轴尺寸
@@ -169,8 +168,8 @@ namespace EchoUI.Render.Win32
                     {
                         // 非 Stretch，测量固有尺寸
                         crossBase = isRow
-                            ? MeasureIntrinsicHeight(child, contentWidth, vpW, vpH)
-                            : MeasureIntrinsicWidth(child, contentHeight, vpW, vpH);
+                            ? MeasureIntrinsicHeight(child, contentWidth, vpW, vpH, measureCacheGeneration)
+                            : MeasureIntrinsicWidth(child, contentHeight, vpW, vpH, measureCacheGeneration);
                     }
                 }
 
@@ -189,52 +188,56 @@ namespace EchoUI.Render.Win32
             }
 
             // --- 第二遍：分配 FlexGrow / FlexShrink ---
-            var normalItems = items.Where(i => !i.IsFloat).ToList();
-            int normalCount = normalItems.Count;
-            float totalGaps = normalCount > 1 ? gap * (normalCount - 1) : 0;
-
-            float usedMain = totalGaps;
-            foreach (var item in normalItems)
+            int normalCount = 0;
+            foreach (var item in items)
             {
+                if (!item.IsFloat)
+                    normalCount++;
+            }
+
+            float totalGaps = normalCount > 1 ? gap * (normalCount - 1) : 0;
+            float usedMain = totalGaps;
+            float totalGrow = 0;
+            float totalShrink = 0;
+            foreach (var item in items)
+            {
+                if (item.IsFloat) continue;
+
                 float marginMain = isRow
                     ? item.Margin.Left + item.Margin.Right
                     : item.Margin.Top + item.Margin.Bottom;
                 usedMain += item.MainBase + marginMain;
+                totalGrow += item.Grow;
+                totalShrink += item.Shrink * item.MainBase;
             }
 
             float freeSpace = mainSize - usedMain;
 
-            if (freeSpace > 0)
+            if (freeSpace > 0 && totalGrow > 0)
             {
-                float totalGrow = normalItems.Sum(i => i.Grow);
-                if (totalGrow > 0)
+                foreach (var item in items)
                 {
-                    foreach (var item in normalItems)
-                    {
-                        if (item.Grow > 0)
-                            item.MainBase += freeSpace * (item.Grow / totalGrow);
-                    }
+                    if (!item.IsFloat && item.Grow > 0)
+                        item.MainBase += freeSpace * (item.Grow / totalGrow);
                 }
             }
-            else if (freeSpace < 0)
+            else if (freeSpace < 0 && totalShrink > 0)
             {
-                float totalShrink = normalItems.Sum(i => i.Shrink * i.MainBase);
-                if (totalShrink > 0)
+                foreach (var item in items)
                 {
-                    foreach (var item in normalItems)
+                    if (!item.IsFloat && item.Shrink > 0)
                     {
-                        if (item.Shrink > 0)
-                        {
-                            float shrinkAmount = (-freeSpace) * (item.Shrink * item.MainBase / totalShrink);
-                            item.MainBase = Math.Max(0, item.MainBase - shrinkAmount);
-                        }
+                        float shrinkAmount = (-freeSpace) * (item.Shrink * item.MainBase / totalShrink);
+                        item.MainBase = Math.Max(0, item.MainBase - shrinkAmount);
                     }
                 }
             }
 
             // --- 应用 Min/Max 约束 ---
-            foreach (var item in normalItems)
+            foreach (var item in items)
             {
+                if (item.IsFloat) continue;
+
                 var child = item.Element;
                 float? minMain, maxMain, minCross, maxCross;
                 if (isRow)
@@ -258,13 +261,16 @@ namespace EchoUI.Render.Win32
             }
 
             // --- 第三遍：JustifyContent 定位 ---
-            float actualUsedMain = totalGaps + normalItems.Sum(i =>
+            float actualUsedMain = totalGaps;
+            foreach (var item in items)
             {
+                if (item.IsFloat) continue;
+
                 float marginMain = isRow
-                    ? i.Margin.Left + i.Margin.Right
-                    : i.Margin.Top + i.Margin.Bottom;
-                return i.MainBase + marginMain;
-            });
+                    ? item.Margin.Left + item.Margin.Right
+                    : item.Margin.Top + item.Margin.Bottom;
+                actualUsedMain += item.MainBase + marginMain;
+            }
 
             float remainingSpace = Math.Max(0, mainSize - actualUsedMain);
             float mainOffset = 0;
@@ -332,7 +338,8 @@ namespace EchoUI.Render.Win32
                     {
                         child.AbsoluteY -= container.ScrollOffsetY;
                     }
-                    LayoutChildren(child, vpW, vpH);
+                    child.UpdateAbsoluteBounds();
+                    LayoutChildren(child, vpW, vpH, measureCacheGeneration);
                     continue;
                 }
 
@@ -388,6 +395,10 @@ namespace EchoUI.Render.Win32
                     child.AbsoluteY -= container.ScrollOffsetY;
                 }
 
+                child.UpdateAbsoluteBounds();
+                contentRight = Math.Max(contentRight, child.LayoutX + child.LayoutWidth + item.Margin.Right);
+                contentBottom = Math.Max(contentBottom, child.LayoutY + child.LayoutHeight + item.Margin.Bottom);
+
                 cursor = mainPos + item.MainBase + marginMainEnd + gap;
                 if (normalIndex < normalCount - 1 &&
                     (container.JustifyContent == JustifyContent.SpaceBetween ||
@@ -397,9 +408,11 @@ namespace EchoUI.Render.Win32
                 }
                 normalIndex++;
 
-                // 递归布局子元素
-                LayoutChildren(child, vpW, vpH);
+                LayoutChildren(child, vpW, vpH, measureCacheGeneration);
             }
+
+            container.CachedContentWidth = contentRight + padding.Right + border;
+            container.CachedContentHeight = contentBottom + padding.Bottom + border;
         }
 
         /// <summary>
@@ -407,18 +420,7 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public static float MeasureContentHeight(Win32Element container, float vpW, float vpH)
         {
-            var padding = ResolveSpacing(container.Padding, container.LayoutWidth, vpW, vpH);
-            float border = GetBorderInset(container);
-            float bottom = border + padding.Top;
-
-            foreach (var child in container.Children)
-            {
-                if (child.Float) continue;
-                var margin = ResolveSpacing(child.Margin, container.LayoutHeight, vpW, vpH);
-                bottom = Math.Max(bottom, child.LayoutY + child.LayoutHeight + margin.Bottom);
-            }
-
-            return bottom + padding.Bottom + border;
+            return container.CachedContentHeight;
         }
 
         /// <summary>
@@ -426,18 +428,7 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public static float MeasureContentWidth(Win32Element container, float vpW, float vpH)
         {
-            var padding = ResolveSpacing(container.Padding, container.LayoutWidth, vpW, vpH);
-            float border = GetBorderInset(container);
-            float right = border + padding.Left;
-
-            foreach (var child in container.Children)
-            {
-                if (child.Float) continue;
-                var margin = ResolveSpacing(child.Margin, container.LayoutWidth, vpW, vpH);
-                right = Math.Max(right, child.LayoutX + child.LayoutWidth + margin.Right);
-            }
-
-            return right + padding.Right + border;
+            return container.CachedContentWidth;
         }
 
         // --- 尺寸解析 ---
@@ -467,174 +458,147 @@ namespace EchoUI.Render.Win32
         /// <summary>
         /// 测量元素的固有宽度。容器会递归测量子元素。
         /// </summary>
-        private static float MeasureIntrinsicWidth(Win32Element element, float availableHeight, float vpW, float vpH)
+        private static float MeasureIntrinsicWidth(Win32Element element, float availableHeight, float vpW, float vpH, int measureCacheGeneration)
         {
-            if (element.ElementType == ElementCoreName.Text)
-                return MeasureTextWidth(element);
+            if (element.IntrinsicWidthCacheVersion == measureCacheGeneration && element.IntrinsicWidthCacheConstraint.Equals(availableHeight))
+                return element.CachedIntrinsicWidth;
 
-            if (element.ElementType == ElementCoreName.Input)
+            float result;
+            if (element.ElementType == ElementCoreName.Text)
+            {
+                result = MeasureTextWidth(element);
+            }
+            else if (element.ElementType == ElementCoreName.Input)
             {
                 var inputPadding = ResolveSpacing(element.Padding, 0, vpW, vpH);
-                return 100 + inputPadding.Left + inputPadding.Right + GetBorderInset(element) * 2;
+                result = 100 + inputPadding.Left + inputPadding.Right + GetBorderInset(element) * 2;
             }
-
-            // 容器：递归测量子元素
-            if (element.Children.Count == 0) return GetBorderInset(element) * 2;
-
-            var padding = ResolveSpacing(element.Padding, 0, vpW, vpH);
-            float border = GetBorderInset(element);
-            bool isRow = element.Direction == LayoutDirection.Horizontal;
-            float gap = element.Gap;
-            float result = 0;
-            int count = 0;
-
-            foreach (var child in element.Children)
+            else if (element.Children.Count == 0)
             {
-                if (child.Float) continue;
-                float childW = ResolveFixedSize(child.Width, vpW, vpH)
-                               ?? MeasureIntrinsicWidth(child, availableHeight, vpW, vpH);
-                var margin = ResolveSpacing(child.Margin, 0, vpW, vpH);
-                float totalChild = childW + margin.Left + margin.Right;
+                result = GetBorderInset(element) * 2;
+            }
+            else
+            {
+                var padding = ResolveSpacing(element.Padding, 0, vpW, vpH);
+                float border = GetBorderInset(element);
+                bool isRow = element.Direction == LayoutDirection.Horizontal;
+                float gap = element.Gap;
+                result = 0;
+                int count = 0;
 
-                if (isRow)
+                foreach (var child in element.Children)
                 {
-                    result += totalChild;
-                    count++;
+                    if (child.Float) continue;
+                    float childW = ResolveFixedSize(child.Width, vpW, vpH)
+                                   ?? MeasureIntrinsicWidth(child, availableHeight, vpW, vpH, measureCacheGeneration);
+                    var margin = ResolveSpacing(child.Margin, 0, vpW, vpH);
+                    float totalChild = childW + margin.Left + margin.Right;
+
+                    if (isRow)
+                    {
+                        result += totalChild;
+                        count++;
+                    }
+                    else
+                    {
+                        result = Math.Max(result, totalChild);
+                        count++;
+                    }
                 }
-                else
-                {
-                    result = Math.Max(result, totalChild);
-                    count++;
-                }
+
+                if (isRow && count > 1)
+                    result += gap * (count - 1);
+
+                result += padding.Left + padding.Right + border * 2;
             }
 
-            if (isRow && count > 1)
-                result += gap * (count - 1);
-
-            return result + padding.Left + padding.Right + border * 2;
+            element.IntrinsicWidthCacheVersion = measureCacheGeneration;
+            element.IntrinsicWidthCacheConstraint = availableHeight;
+            element.CachedIntrinsicWidth = result;
+            return result;
         }
 
         /// <summary>
         /// 测量元素的固有高度。容器会递归测量子元素。
         /// </summary>
-        private static float MeasureIntrinsicHeight(Win32Element element, float availableWidth, float vpW, float vpH)
+        private static float MeasureIntrinsicHeight(Win32Element element, float availableWidth, float vpW, float vpH, int measureCacheGeneration)
         {
-            if (element.ElementType == ElementCoreName.Text)
-                return MeasureTextHeight(element, availableWidth);
+            if (element.IntrinsicHeightCacheVersion == measureCacheGeneration && element.IntrinsicHeightCacheConstraint.Equals(availableWidth))
+                return element.CachedIntrinsicHeight;
 
-            if (element.ElementType == ElementCoreName.Input)
+            float result;
+            if (element.ElementType == ElementCoreName.Text)
+            {
+                result = MeasureTextHeight(element, availableWidth);
+            }
+            else if (element.ElementType == ElementCoreName.Input)
             {
                 var inputPadding = ResolveSpacing(element.Padding, 0, vpW, vpH);
-                return 24 + inputPadding.Top + inputPadding.Bottom + GetBorderInset(element) * 2;
+                result = 24 + inputPadding.Top + inputPadding.Bottom + GetBorderInset(element) * 2;
             }
-
-            // 容器：递归测量子元素
-            if (element.Children.Count == 0) return GetBorderInset(element) * 2;
-
-            var padding = ResolveSpacing(element.Padding, 0, vpW, vpH);
-            float border = GetBorderInset(element);
-            bool isRow = element.Direction == LayoutDirection.Horizontal;
-            float gap = element.Gap;
-            float result = 0;
-            int count = 0;
-
-            foreach (var child in element.Children)
+            else if (element.Children.Count == 0)
             {
-                if (child.Float) continue;
-                float childH = ResolveFixedSize(child.Height, vpW, vpH)
-                               ?? MeasureIntrinsicHeight(child, availableWidth, vpW, vpH);
-                var margin = ResolveSpacing(child.Margin, 0, vpW, vpH);
-                float totalChild = childH + margin.Top + margin.Bottom;
+                result = GetBorderInset(element) * 2;
+            }
+            else
+            {
+                var padding = ResolveSpacing(element.Padding, 0, vpW, vpH);
+                float border = GetBorderInset(element);
+                bool isRow = element.Direction == LayoutDirection.Horizontal;
+                float gap = element.Gap;
+                result = 0;
+                int count = 0;
 
-                if (isRow)
+                foreach (var child in element.Children)
                 {
-                    result = Math.Max(result, totalChild);
-                    count++;
+                    if (child.Float) continue;
+                    float childH = ResolveFixedSize(child.Height, vpW, vpH)
+                                   ?? MeasureIntrinsicHeight(child, availableWidth, vpW, vpH, measureCacheGeneration);
+                    var margin = ResolveSpacing(child.Margin, 0, vpW, vpH);
+                    float totalChild = childH + margin.Top + margin.Bottom;
+
+                    if (isRow)
+                    {
+                        result = Math.Max(result, totalChild);
+                        count++;
+                    }
+                    else
+                    {
+                        result += totalChild;
+                        count++;
+                    }
                 }
-                else
-                {
-                    result += totalChild;
-                    count++;
-                }
+
+                if (!isRow && count > 1)
+                    result += gap * (count - 1);
+
+                result += padding.Top + padding.Bottom + border * 2;
             }
 
-            if (!isRow && count > 1)
-                result += gap * (count - 1);
-
-            return result + padding.Top + padding.Bottom + border * 2;
+            element.IntrinsicHeightCacheVersion = measureCacheGeneration;
+            element.IntrinsicHeightCacheConstraint = availableWidth;
+            element.CachedIntrinsicHeight = result;
+            return result;
         }
 
         private static float MeasureTextWidth(Win32Element element)
         {
             if (string.IsNullOrEmpty(element.Text)) return 0;
-            float fontSize = element.FontSize > 0 ? element.FontSize : 14;
 
-            lock (_measureGraphics)
-            {
-                var fontStyle = FontStyle.Regular;
-                if (element.FontWeight != null)
-                {
-                     var weight = element.FontWeight.ToLower();
-                     if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
-                         fontStyle = FontStyle.Bold;
-                }
-
-                using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
-                var size = _measureGraphics.MeasureString(element.Text, font, new PointF(0, 0), _defaultStringFormat);
-                
-                return size.Width;
-            }
+            var fontSize = element.FontSize > 0 ? element.FontSize : 14;
+            var size = GdiText.MeasureText(element.Text, element.FontFamily, fontSize, element.FontWeight, noWrap: true);
+            return size.Width;
         }
 
         private static float MeasureTextHeight(Win32Element element, float widthConstraint)
         {
-            float fontSize = element.FontSize > 0 ? element.FontSize : 14;
-            // 如果空文本，至少保留一行高度
-            if (string.IsNullOrEmpty(element.Text)) return fontSize * 1.4f;
+            var fontSize = element.FontSize > 0 ? element.FontSize : 14;
+            if (string.IsNullOrEmpty(element.Text))
+                return GdiText.GetPreferredLineHeight(element.FontFamily, fontSize, element.FontWeight);
 
-            lock (_measureGraphics)
-            {
-                var fontStyle = FontStyle.Regular;
-                if (element.FontWeight != null)
-                {
-                     var weight = element.FontWeight.ToLower();
-                     if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
-                         fontStyle = FontStyle.Bold;
-                }
-
-                using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
-
-                if (element.NoWrap)
-                {
-                    var singleLineSize = _measureGraphics.MeasureString(element.Text, font, new PointF(0, 0), _defaultStringFormat);
-                    return singleLineSize.Height;
-                }
-
-                // 如果有宽度约束，传入宽度；否则传入虽大宽度
-                float maxWidth = widthConstraint > 0 ? widthConstraint : 100000f;
-                var size = _measureGraphics.MeasureString(element.Text, font, (int)Math.Ceiling(maxWidth), _defaultStringFormat);
-                
-                return size.Height;
-            }
-        }
-
-        private static string ResolveFontFamily(Win32Element element)
-        {
-            if (!string.IsNullOrEmpty(element.FontFamily))
-                return element.FontFamily;
-
-            return IsLikelyEmojiOrSymbol(element.Text) ? "Segoe UI Emoji" : "Segoe UI";
-        }
-
-        private static bool IsLikelyEmojiOrSymbol(string? text)
-        {
-            if (string.IsNullOrEmpty(text)) return false;
-            foreach (var c in text)
-            {
-                if (char.IsSurrogate(c)) return true;
-                if (c >= 0x2000 && c <= 0x33FF) return true;
-            }
-            return false;
+            float? maxWidth = element.NoWrap ? null : widthConstraint > 0 ? widthConstraint : 100000f;
+            var size = GdiText.MeasureText(element.Text, element.FontFamily, fontSize, element.FontWeight, maxWidth, element.NoWrap);
+            return size.Height;
         }
 
         private static (float Left, float Top, float Right, float Bottom) ResolveSpacing(

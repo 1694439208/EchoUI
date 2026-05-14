@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>net9.0-windows</TargetFramework>
+		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
@@ -8,6 +8,5 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\EchoUI.Core\EchoUI.Core.csproj" />
-		<PackageReference Include="System.Drawing.Common" Version="9.0.0" />
 	</ItemGroup>
 </Project>

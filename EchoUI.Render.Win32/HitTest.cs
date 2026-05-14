@@ -1,4 +1,3 @@
-using System.Drawing;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
@@ -28,41 +27,21 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public Win32Element? HitTest(Win32Element root, float x, float y)
         {
-            // 1. 优先检查全局 Float 层（倒序，最新的在最上层）
             var floats = _renderer.FloatingElements;
             if (floats != null)
             {
                 for (int i = floats.Count - 1; i >= 0; i--)
                 {
-                    // 注意：这里的 HitTestRecursive 内部也会检查它自己的 Float 子元素
-                    // 但由于我们将所有 Float 元素都收集到了 FloatingElements，
-                    // 其实这里只需检查 floats[i] 自身及其非 Float 子元素即可。
-                    // 不过为了简单，复用 HitTestRecursive 也没问题，
-                    // 因为嵌套的 Float 元素虽然也在 FloatingElements 列表里（如果被递归收集的话），
-                    // 但我们的收集逻辑是 "遇到 Float 则停止递归 collecting children"，
-                    // 所以 FloatingElements 只包含 "Root Floats"。
-                    // 它可以包含嵌套的 Float 吗？看收集逻辑。
-                    // 收集逻辑：if (child.Float) { add; } else { recurse; }
-                    // 所以 FloatingElements 包含的是最外层的 Float 元素。
-                    // 它们的内部 Float 元素没有被收集到顶层列表，而是保留在子树中。
-                    // 所以 HitTestRecursive(floats[i]) 会正确处理内部结构。
-                    
                     var hit = HitTestRecursive(floats[i], x, y);
-                    if (hit != null) return hit;
+                    if (hit != null)
+                        return hit;
                 }
             }
 
-            // 2. 检查常规树
-            // 注意：如果鼠标在 Float 元素上，上面的循环应该已经返回了。
-            // 但如果在常规树遍历中再次遇到了该 Float 元素（因为它是某个节点的 Child），
-            // HitTestRecursive 会再次检查它。
-            // 这虽然有重复，但如果是 "Return null check" (Line 49 in HitTestRecursive)，
-            // 或者是正常的命中测试，结果应该一致。
-            // 唯一的问题是：如果 Float 元素遮挡了后面的常规元素，
-            // 这里的 step 1 已经捕获了。
-            // 如果 Float 元素被后面的常规元素遮挡（通常不应该，Float 应在顶层），
-            // 这里的 step 1 也会优先捕获，实现了 "TopMost" 效果。
-            
+            var localHit = HitTestFromHoveredChain(x, y);
+            if (localHit != null)
+                return localHit;
+
             return HitTestRecursive(root, x, y);
         }
 
@@ -136,27 +115,26 @@ namespace EchoUI.Render.Win32
         {
             var hit = HitTest(root, x, y);
 
-            // 处理 Enter/Leave
             if (hit != _hoveredElement)
             {
-                // 向上遍历旧元素链，触发 Leave
-                if (_hoveredElement != null)
+                var oldHovered = _hoveredElement;
+                var commonAncestor = FindCommonAncestor(oldHovered, hit);
+
+                if (oldHovered != null)
                 {
-                    FireMouseLeaveChain(_hoveredElement, hit);
+                    FireMouseLeaveChain(oldHovered, commonAncestor);
                 }
 
-                // 向上遍历新元素链，触发 Enter
                 if (hit != null)
                 {
-                    FireMouseEnterChain(hit, _hoveredElement);
+                    FireMouseEnterChain(hit, commonAncestor);
                 }
 
                 _hoveredElement = hit;
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(oldHovered, hit);
             }
 
-            // 向上冒泡查找有 OnMouseMove 的元素
-            var moveTarget = FindHandler(hit, e => e.OnMouseMove != null || e.OnPointerMove != null);
+            var moveTarget = FindMoveHandler(hit);
             if (moveTarget != null)
             {
                 var localPoint = ToLocalPoint(moveTarget, x, y);
@@ -172,20 +150,20 @@ namespace EchoUI.Render.Win32
         {
             var hit = HitTest(root, x, y);
             _pressedButton = button;
-            _pressedClickTarget = FindHandler(hit, e => e.OnClick != null);
+            _pressedClickTarget = FindClickHandler(hit);
 
             SetFocusedElement(FindFocusableElement(hit));
 
             if (hit != null)
             {
-                var downTarget = FindHandler(hit, e => e.OnMouseDown != null || e.OnPointerDown != null);
+                var downTarget = FindDownHandler(hit);
                 if (downTarget != null)
                 {
                     var localPoint = ToLocalPoint(downTarget, x, y);
                     downTarget.OnMouseDown?.Invoke();
                     downTarget.OnPointerDown?.Invoke(new MouseEvent(localPoint, button));
                 }
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(hit);
             }
         }
 
@@ -198,7 +176,7 @@ namespace EchoUI.Render.Win32
 
             if (hit != null)
             {
-                var upTarget = FindHandler(hit, e => e.OnMouseUp != null || e.OnPointerUp != null);
+                var upTarget = FindUpHandler(hit);
                 if (upTarget != null)
                 {
                     var localPoint = ToLocalPoint(upTarget, x, y);
@@ -206,13 +184,13 @@ namespace EchoUI.Render.Win32
                     upTarget.OnPointerUp?.Invoke(new MouseEvent(localPoint, button));
                 }
 
-                var releaseClickTarget = FindHandler(hit, e => e.OnClick != null);
+                var releaseClickTarget = FindClickHandler(hit);
                 if (releaseClickTarget != null && ReferenceEquals(releaseClickTarget, _pressedClickTarget))
                 {
                     releaseClickTarget.OnClick?.Invoke(button);
                 }
 
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(hit, _pressedClickTarget);
             }
 
             _pressedButton = null;
@@ -234,6 +212,8 @@ namespace EchoUI.Render.Win32
                 float maxScrollX = Math.Max(0, contentWidth - scrollTarget.LayoutWidth);
                 float maxScrollY = Math.Max(0, contentHeight - scrollTarget.LayoutHeight);
                 bool scrollHorizontal = (NativeInterop.GetKeyState(NativeInterop.VK_SHIFT) & 0x8000) != 0 || maxScrollY <= 0;
+                float previousScrollX = scrollTarget.ScrollOffsetX;
+                float previousScrollY = scrollTarget.ScrollOffsetY;
 
                 if (scrollHorizontal && maxScrollX > 0)
                 {
@@ -246,7 +226,10 @@ namespace EchoUI.Render.Win32
                     scrollTarget.ScrollOffsetY = Math.Clamp(scrollTarget.ScrollOffsetY, 0, maxScrollY);
                 }
 
-                _renderer.RequestRelayout();
+                if (!previousScrollX.Equals(scrollTarget.ScrollOffsetX) || !previousScrollY.Equals(scrollTarget.ScrollOffsetY))
+                {
+                    _renderer.RequestScrollReposition(scrollTarget);
+                }
             }
         }
 
@@ -297,41 +280,36 @@ namespace EchoUI.Render.Win32
         {
             if (_hoveredElement != null)
             {
-                FireMouseLeaveChain(_hoveredElement, null);
+                var oldHovered = _hoveredElement;
+                FireMouseLeaveChain(oldHovered, null);
                 _hoveredElement = null;
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(oldHovered);
             }
         }
 
         // --- 辅助方法 ---
 
-        private void FireMouseLeaveChain(Win32Element from, Win32Element? to)
+        private void FireMouseLeaveChain(Win32Element from, Win32Element? stopAt)
         {
             var current = from;
-            while (current != null)
+            while (current != null && current != stopAt)
             {
-                if (current == to) break;
-                if (IsAncestorOf(current, to)) break;
                 current.OnMouseLeave?.Invoke();
                 current.IsHovered = false;
                 current = current.Parent;
             }
         }
 
-        private void FireMouseEnterChain(Win32Element to, Win32Element? from)
+        private void FireMouseEnterChain(Win32Element to, Win32Element? stopAt)
         {
-            // 收集需要触发 Enter 的元素
             var chain = new List<Win32Element>();
             var current = to;
-            while (current != null)
+            while (current != null && current != stopAt)
             {
-                if (current == from) break;
-                if (IsAncestorOf(current, from)) break;
                 chain.Add(current);
                 current = current.Parent;
             }
 
-            // 从外到内触发 Enter
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 chain[i].OnMouseEnter?.Invoke();
@@ -339,30 +317,170 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        /// <summary>
-        /// 向上冒泡查找满足条件的元素
-        /// </summary>
-        private static Win32Element? FindHandler(Win32Element? element, Func<Win32Element, bool> predicate)
+        private Win32Element? HitTestFromHoveredChain(float x, float y)
+        {
+            var current = _hoveredElement;
+            while (current != null)
+            {
+                if (!current.Float)
+                {
+                    var hit = HitTestRecursive(current, x, y);
+                    if (hit != null)
+                        return hit;
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        public void DetachSubtree(Win32Element subtreeRoot)
+        {
+            if (_hoveredElement != null && IsInSubtree(subtreeRoot, _hoveredElement))
+            {
+                var oldHovered = _hoveredElement;
+                FireMouseLeaveChain(oldHovered, null);
+                _hoveredElement = null;
+                _renderer.RequestRepaint(oldHovered);
+            }
+
+            if (_pressedClickTarget != null && IsInSubtree(subtreeRoot, _pressedClickTarget))
+            {
+                _pressedClickTarget = null;
+                _pressedButton = null;
+            }
+
+            if (_focusedElement != null && IsInSubtree(subtreeRoot, _focusedElement))
+            {
+                SetFocusedElement(null);
+            }
+        }
+
+        private static Win32Element? FindCommonAncestor(Win32Element? first, Win32Element? second)
+        {
+            var firstDepth = GetDepth(first);
+            var secondDepth = GetDepth(second);
+
+            while (firstDepth > secondDepth && first != null)
+            {
+                first = first.Parent;
+                firstDepth--;
+            }
+
+            while (secondDepth > firstDepth && second != null)
+            {
+                second = second.Parent;
+                secondDepth--;
+            }
+
+            while (first != second)
+            {
+                first = first?.Parent;
+                second = second?.Parent;
+            }
+
+            return first;
+        }
+
+        private static int GetDepth(Win32Element? element)
+        {
+            int depth = 0;
+            var current = element;
+            while (current != null)
+            {
+                depth++;
+                current = current.Parent;
+            }
+
+            return depth;
+        }
+
+        private static bool IsInSubtree(Win32Element subtreeRoot, Win32Element? element)
         {
             var current = element;
             while (current != null)
             {
-                if (predicate(current)) return current;
+                if (ReferenceEquals(current, subtreeRoot))
+                    return true;
                 current = current.Parent;
             }
+
+            return false;
+        }
+
+        private static Win32Element? FindMoveHandler(Win32Element? element)
+        {
+            var current = element;
+            while (current != null)
+            {
+                if (current.OnMouseMove != null || current.OnPointerMove != null)
+                    return current;
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static Win32Element? FindClickHandler(Win32Element? element)
+        {
+            var current = element;
+            while (current != null)
+            {
+                if (current.OnClick != null)
+                    return current;
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static Win32Element? FindDownHandler(Win32Element? element)
+        {
+            var current = element;
+            while (current != null)
+            {
+                if (current.OnMouseDown != null || current.OnPointerDown != null)
+                    return current;
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static Win32Element? FindUpHandler(Win32Element? element)
+        {
+            var current = element;
+            while (current != null)
+            {
+                if (current.OnMouseUp != null || current.OnPointerUp != null)
+                    return current;
+                current = current.Parent;
+            }
+
             return null;
         }
 
         private static Win32Element? FindFocusableElement(Win32Element? element)
         {
-            return FindHandler(element, static e =>
-                e.ElementType == ElementCoreName.Input ||
-                e.OnKeyDown != null ||
-                e.OnKeyUp != null ||
-                e.OnTextInput != null ||
-                e.OnTextComposition != null ||
-                e.OnFocus != null ||
-                e.OnBlur != null);
+            var current = element;
+            while (current != null)
+            {
+                if (current.ElementType == ElementCoreName.Input ||
+                    current.OnKeyDown != null ||
+                    current.OnKeyUp != null ||
+                    current.OnTextInput != null ||
+                    current.OnTextComposition != null ||
+                    current.OnFocus != null ||
+                    current.OnBlur != null)
+                {
+                    return current;
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
         }
 
         private void SetFocusedElement(Win32Element? element)
@@ -380,10 +498,11 @@ namespace EchoUI.Render.Win32
                 return;
             }
 
-            if (_focusedElement != null)
+            var oldFocused = _focusedElement;
+            if (oldFocused != null)
             {
-                _focusedElement.IsFocused = false;
-                _focusedElement.OnBlur?.Invoke();
+                oldFocused.IsFocused = false;
+                oldFocused.OnBlur?.Invoke();
             }
 
             _focusedElement = element;
@@ -404,7 +523,7 @@ namespace EchoUI.Render.Win32
                 _focusedElement.OnFocus?.Invoke();
             }
 
-            _renderer.RequestRepaint();
+            _renderer.RequestRepaint(oldFocused, _focusedElement);
         }
 
         private static Core.Point ToLocalPoint(Win32Element element, float x, float y)
@@ -426,16 +545,5 @@ namespace EchoUI.Render.Win32
             return null;
         }
 
-        private static bool IsAncestorOf(Win32Element? ancestor, Win32Element? descendant)
-        {
-            if (ancestor == null || descendant == null) return false;
-            var current = descendant.Parent;
-            while (current != null)
-            {
-                if (current == ancestor) return true;
-                current = current.Parent;
-            }
-            return false;
-        }
     }
 }

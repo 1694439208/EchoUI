@@ -1,4 +1,7 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+
+[assembly: SupportedOSPlatform("windows")]
 
 namespace EchoUI.Render.Win32
 {
@@ -84,6 +87,9 @@ namespace EchoUI.Render.Win32
         public const int VK_SHIFT = 0x10;
         public const uint CF_UNICODETEXT = 13;
         public const uint GMEM_MOVEABLE = 0x0002;
+        public const uint COINIT_APARTMENTTHREADED = 0x2;
+        public const int S_OK = 0;
+        public const int S_FALSE = 1;
 
         // --- TrackMouseEvent ---
         public const uint TME_LEAVE = 0x00000002;
@@ -121,6 +127,88 @@ namespace EchoUI.Render.Win32
             public int Bottom;
             public int Width => Right - Left;
             public int Height => Bottom - Top;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SIZE
+        {
+            public int cx;
+            public int cy;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct TEXTMETRIC
+        {
+            public int tmHeight;
+            public int tmAscent;
+            public int tmDescent;
+            public int tmInternalLeading;
+            public int tmExternalLeading;
+            public int tmAveCharWidth;
+            public int tmMaxCharWidth;
+            public int tmWeight;
+            public int tmOverhang;
+            public int tmDigitizedAspectX;
+            public int tmDigitizedAspectY;
+            public char tmFirstChar;
+            public char tmLastChar;
+            public char tmDefaultChar;
+            public char tmBreakChar;
+            public byte tmItalic;
+            public byte tmUnderlined;
+            public byte tmStruckOut;
+            public byte tmPitchAndFamily;
+            public byte tmCharSet;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAPINFOHEADER
+        {
+            public uint biSize;
+            public int biWidth;
+            public int biHeight;
+            public ushort biPlanes;
+            public ushort biBitCount;
+            public uint biCompression;
+            public uint biSizeImage;
+            public int biXPelsPerMeter;
+            public int biYPelsPerMeter;
+            public uint biClrUsed;
+            public uint biClrImportant;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RGBQUAD
+        {
+            public byte rgbBlue;
+            public byte rgbGreen;
+            public byte rgbRed;
+            public byte rgbReserved;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAPINFO
+        {
+            public BITMAPINFOHEADER bmiHeader;
+            public RGBQUAD bmiColors;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BLENDFUNCTION
+        {
+            public byte BlendOp;
+            public byte BlendFlags;
+            public byte SourceConstantAlpha;
+            public byte AlphaFormat;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct GdiplusStartupInput
+        {
+            public uint GdiplusVersion;
+            public nint DebugEventCallback;
+            public int SuppressBackgroundThread;
+            public int SuppressExternalCodecs;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -221,6 +309,9 @@ namespace EchoUI.Render.Win32
         public static extern bool InvalidateRect(nint hWnd, nint lpRect, bool bErase);
 
         [DllImport("user32.dll")]
+        public static extern bool InvalidateRect(nint hWnd, ref RECT lpRect, bool bErase);
+
+        [DllImport("user32.dll")]
         public static extern nint BeginPaint(nint hWnd, out PAINTSTRUCT lpPaint);
 
         [DllImport("user32.dll")]
@@ -295,6 +386,18 @@ namespace EchoUI.Render.Win32
         [DllImport("user32.dll")]
         public static extern bool IsClipboardFormatAvailable(uint format);
 
+        [DllImport("user32.dll")]
+        public static extern nint GetDC(nint hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern int ReleaseDC(nint hWnd, nint hDC);
+
+        [DllImport("user32.dll")]
+        public static extern int FillRect(nint hDC, ref RECT lprc, nint hbr);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int DrawText(nint hdc, string lpchText, int cchText, ref RECT lprc, uint format);
+
         // --- Kernel32.dll ---
         [DllImport("kernel32.dll")]
         public static extern nint GetModuleHandle(string? lpModuleName);
@@ -311,12 +414,56 @@ namespace EchoUI.Render.Win32
         [DllImport("kernel32.dll")]
         public static extern nint GlobalFree(nint hMem);
 
+        [DllImport("ole32.dll")]
+        public static extern int CoInitializeEx(nint pvReserved, uint dwCoInit);
+
+        [DllImport("ole32.dll")]
+        public static extern void CoUninitialize();
+
         // --- Gdi32.dll ---
         [DllImport("gdi32.dll")]
         public static extern nint GetStockObject(int fnObject);
 
         public const int WHITE_BRUSH = 0;
+        public const int NULL_BRUSH = 5;
+        public const int NULL_PEN = 8;
         public const int TRANSPARENT = 1;
+        public const int PS_SOLID = 0;
+        public const int PS_DASH = 1;
+        public const int PS_DOT = 2;
+        public const int SRCCOPY = 0x00CC0020;
+        public const int HALFTONE = 4;
+        public const uint DT_TOP = 0x00000000;
+        public const uint DT_LEFT = 0x00000000;
+        public const uint DT_WORDBREAK = 0x00000010;
+        public const uint DT_SINGLELINE = 0x00000020;
+        public const uint DT_CALCRECT = 0x00000400;
+        public const uint DT_NOPREFIX = 0x00000800;
+        public const int FW_NORMAL = 400;
+        public const int FW_BOLD = 700;
+        public const uint DEFAULT_CHARSET = 1;
+        public const uint OUT_DEFAULT_PRECIS = 0;
+        public const uint CLIP_DEFAULT_PRECIS = 0;
+        public const uint CLEARTYPE_QUALITY = 5;
+        public const uint DEFAULT_PITCH = 0;
+        public const uint FF_DONTCARE = 0;
+        public const uint DIB_RGB_COLORS = 0;
+        public const uint BI_RGB = 0;
+        public const byte AC_SRC_OVER = 0;
+        public const byte AC_SRC_ALPHA = 1;
+        public const uint GENERIC_READ = 0x80000000;
+
+        // --- GDI+ ---
+        public const int GdipOk = 0;
+        public const int FillModeAlternate = 0;
+        public const int UnitPixel = 2;
+        public const int SmoothingModeAntiAlias = 4;
+        public const int PixelOffsetModeHalf = 4;
+        public const int DashStyleSolid = 0;
+        public const int DashStyleDash = 1;
+        public const int DashStyleDot = 2;
+        public const int CombineModeIntersect = 1;
+        public const int FlushIntentionFlush = 0;
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         public static extern nint SendMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
@@ -339,22 +486,130 @@ namespace EchoUI.Render.Win32
         [DllImport("gdi32.dll")]
         public static extern bool DeleteObject(nint hObject);
 
-        public const uint SRCCOPY = 0x00CC0020;
-
         [DllImport("gdi32.dll")]
         public static extern nint CreateCompatibleDC(nint hdc);
-
-        [DllImport("gdi32.dll")]
-        public static extern nint CreateCompatibleBitmap(nint hdc, int cx, int cy);
-
-        [DllImport("gdi32.dll")]
-        public static extern nint SelectObject(nint hdc, nint hObject);
 
         [DllImport("gdi32.dll")]
         public static extern bool DeleteDC(nint hdc);
 
         [DllImport("gdi32.dll")]
-        public static extern bool BitBlt(nint hdcDest, int xDest, int yDest, int width, int height, nint hdcSrc, int xSrc, int ySrc, uint rop);
+        public static extern nint CreateCompatibleBitmap(nint hdc, int cx, int cy);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint SelectObject(nint hdc, nint h);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool BitBlt(nint hdc, int x, int y, int cx, int cy, nint hdcSrc, int x1, int y1, int rop);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool StretchBlt(nint hdcDest, int xDest, int yDest, int wDest, int hDest, nint hdcSrc, int xSrc, int ySrc, int wSrc, int hSrc, int rop);
+
+        [DllImport("msimg32.dll", SetLastError = true)]
+        public static extern bool AlphaBlend(nint hdcDest, int xOriginDest, int yOriginDest, int wDest, int hDest, nint hdcSrc, int xOriginSrc, int yOriginSrc, int wSrc, int hSrc, BLENDFUNCTION blendFunction);
+
+        [DllImport("gdi32.dll")]
+        public static extern int SetStretchBltMode(nint hdc, int mode);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint CreatePen(int fnPenStyle, int nWidth, int crColor);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool Rectangle(nint hdc, int left, int top, int right, int bottom);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool RoundRect(nint hdc, int left, int top, int right, int bottom, int width, int height);
+
+        [DllImport("gdi32.dll")]
+        public static extern int SaveDC(nint hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool RestoreDC(nint hdc, int nSavedDC);
+
+        [DllImport("gdi32.dll")]
+        public static extern int IntersectClipRect(nint hdc, int left, int top, int right, int bottom);
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        public static extern nint CreateFont(int cHeight, int cWidth, int cEscapement, int cOrientation, int cWeight,
+            uint bItalic, uint bUnderline, uint bStrikeOut, uint iCharSet, uint iOutPrecision, uint iClipPrecision,
+            uint iQuality, uint iPitchAndFamily, string pszFaceName);
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool GetTextExtentPoint32(nint hdc, string lpString, int c, out SIZE psizl);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool GetTextMetrics(nint hdc, out TEXTMETRIC lptm);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint CreateDIBSection(nint hdc, ref BITMAPINFO pbmi, uint usage, out nint ppvBits, nint hSection, uint offset);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdiplusStartup(out nint token, ref GdiplusStartupInput input, nint output);
+
+        [DllImport("gdiplus.dll")]
+        public static extern void GdiplusShutdown(nint token);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipCreateFromHDC(nint hdc, out nint graphics);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipDeleteGraphics(nint graphics);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipSetSmoothingMode(nint graphics, int smoothingMode);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipSetPixelOffsetMode(nint graphics, int pixelOffsetMode);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipSaveGraphics(nint graphics, out uint state);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipRestoreGraphics(nint graphics, uint state);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipSetClipRect(nint graphics, float x, float y, float width, float height, int combineMode);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipFlush(nint graphics, int intention);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipCreatePath(int brushMode, out nint path);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipDeletePath(nint path);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipStartPathFigure(nint path);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipClosePathFigure(nint path);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipAddPathArc(nint path, float x, float y, float width, float height, float startAngle, float sweepAngle);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipAddPathLine(nint path, float x1, float y1, float x2, float y2);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipCreateSolidFill(uint color, out nint brush);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipDeleteBrush(nint brush);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipFillPath(nint graphics, nint brush, nint path);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipCreatePen1(uint color, float width, int unit, out nint pen);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipDeletePen(nint pen);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipSetPenDashStyle(nint pen, int dashStyle);
+
+        [DllImport("gdiplus.dll")]
+        public static extern int GdipDrawPath(nint graphics, nint pen, nint path);
 
         [DllImport("imm32.dll")]
         public static extern nint ImmGetContext(nint hWnd);

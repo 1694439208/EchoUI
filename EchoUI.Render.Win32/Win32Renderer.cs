@@ -1,7 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using System.Diagnostics;
 using EchoUI.Core;
 
@@ -34,28 +31,15 @@ namespace EchoUI.Render.Win32
         /// </summary>
         private bool _suppressEditNotification;
         private bool _disposed;
+        private bool _layoutValid;
+        private float _layoutViewportWidth;
+        private float _layoutViewportHeight;
+        private int _layoutCacheGeneration = 1;
         private readonly HashSet<string> _nativeDiagnostics = [];
-        private static readonly Bitmap _measureBitmap = new(1, 1);
-        private static readonly Graphics _measureGraphics;
-        private static readonly StringFormat _measureStringFormat;
 
         internal Win32Element? RootElement => _rootElement;
         internal Win32UpdateScheduler? Scheduler => _scheduler;
         internal HitTestManager HitTestManager => _hitTestManager!;
-
-        static Win32Renderer()
-        {
-            _measureGraphics = Graphics.FromImage(_measureBitmap);
-            _measureGraphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            _measureGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-            _measureStringFormat = new StringFormat
-            {
-                Alignment = StringAlignment.Near,
-                LineAlignment = StringAlignment.Near,
-                Trimming = StringTrimming.None,
-                FormatFlags = StringFormatFlags.MeasureTrailingSpaces
-            };
-        }
 
         public Win32Renderer(Win32Window window)
         {
@@ -63,6 +47,12 @@ namespace EchoUI.Render.Win32
             _hitTestManager = new HitTestManager(this);
             _animationManager = new Win32AnimationManager(window, this);
             window.SetRenderer(this);
+        }
+
+        private void InvalidateLayoutCache()
+        {
+            _layoutValid = false;
+            _layoutCacheGeneration++;
         }
 
         public object CreateElement(string type)
@@ -92,6 +82,7 @@ namespace EchoUI.Render.Win32
             UpdateEventHandlers(element, newProps);
 
             if (patch.UpdatedProperties == null) return;
+            InvalidateLayoutCache();
 
             // 1. 捕获动画属性的旧值
             (string propName, object? oldValue)[]? animatedProps = null;
@@ -183,7 +174,7 @@ namespace EchoUI.Render.Win32
             else
                 parentElement.Children.Add(childElement);
 
-
+            InvalidateLayoutCache();
         }
 
         public void RemoveChild(object parent, object child)
@@ -199,8 +190,10 @@ namespace EchoUI.Render.Win32
             }
 
             var childElement = (Win32Element)child;
+            _hitTestManager?.DetachSubtree(childElement);
             parentElement.Children.Remove(childElement);
             childElement.Parent = null;
+            InvalidateLayoutCache();
 
             ReleaseElementTree(childElement);
         }
@@ -225,22 +218,12 @@ namespace EchoUI.Render.Win32
             else
                 parentElement.Children.Add(childElement);
 
-
+            InvalidateLayoutCache();
         }
 
         public TextMeasurementResult MeasureText(TextMeasurementRequest request)
         {
-            var text = request.Text ?? string.Empty;
-            var fontSize = request.FontSize ?? 14f;
-            var fontStyle = ResolveFontStyle(request.FontWeight);
-            var fontFamily = ResolveFontFamily(request.FontFamily, text);
-
-            lock (_measureGraphics)
-            {
-                using var font = new Font(fontFamily, fontSize, fontStyle, GraphicsUnit.Pixel);
-                var size = _measureGraphics.MeasureString(text, font, new PointF(0, 0), _measureStringFormat);
-                return new TextMeasurementResult(size.Width, size.Height);
-            }
+            return GdiText.MeasureText(request.Text, request.FontFamily, request.FontSize ?? 14f, request.FontWeight);
         }
 
         public Task<string> ReadClipboardTextAsync()
@@ -440,10 +423,12 @@ namespace EchoUI.Render.Win32
                     {
                         LoadImage(element, src);
                     }
-                    else if (propValue == null && element.NativeImage != null)
+                    else if (propValue == null && element.NativeImageHandle != 0)
                     {
-                        element.NativeImage.Dispose();
-                        element.NativeImage = null;
+                        NativeInterop.DeleteObject(element.NativeImageHandle);
+                        element.NativeImageHandle = 0;
+                        element.NativeImageWidth = 0;
+                        element.NativeImageHeight = 0;
                     }
                     return;
                 }
@@ -662,31 +647,6 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private static string ResolveFontFamily(string? fontFamily, string? text)
-        {
-            if (!string.IsNullOrWhiteSpace(fontFamily))
-                return fontFamily;
-
-            return IsLikelyEmojiOrSymbol(text) ? "Segoe UI Emoji" : "Segoe UI";
-        }
-
-        private static bool IsLikelyEmojiOrSymbol(string? text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return false;
-
-            foreach (var c in text)
-            {
-                if (char.IsSurrogate(c))
-                    return true;
-
-                if (c >= 0x2000 && c <= 0x33FF)
-                    return true;
-            }
-
-            return false;
-        }
-
         [Conditional("DEBUG")]
         private void ReportNativeDiagnostic(string message)
         {
@@ -741,35 +701,12 @@ namespace EchoUI.Render.Win32
                 }
             }
             
-            // --- 同步字体 ---
-            // 简单起见，每次只要属性可能变了就重建字体 (GDI 资源要注意释放)
-            // 这里为了简化逻辑，我们先释放旧的
-            if (element.NativeFontHandle != 0)
+            var fontHandle = GdiText.GetFontHandle(element.FontFamily, element.FontSize > 0 ? element.FontSize : 14, element.FontWeight);
+            if (fontHandle != 0 && element.NativeFontHandle != fontHandle)
             {
-                NativeInterop.DeleteObject(element.NativeFontHandle);
-                element.NativeFontHandle = 0;
+                element.NativeFontHandle = fontHandle;
+                NativeInterop.SendMessage(element.EditHwnd, NativeInterop.WM_SETFONT, fontHandle, 1);
             }
-            
-            var fontStyle = ResolveFontStyle(element.FontWeight);
-
-            using (var font = new Font(element.FontFamily ?? "Segoe UI", element.FontSize > 0 ? element.FontSize : 14, fontStyle, GraphicsUnit.Pixel))
-            {
-                element.NativeFontHandle = font.ToHfont();
-                NativeInterop.SendMessage(element.EditHwnd, NativeInterop.WM_SETFONT, element.NativeFontHandle, 1);
-            }
-
-            // --- 同步背景刷 (用于 WM_CTLCOLOREDIT) ---
-            if (element.NativeBrushHandle != 0)
-            {
-                NativeInterop.DeleteObject(element.NativeBrushHandle);
-                element.NativeBrushHandle = 0;
-            }
-            // 如果透明背景或者默认，通常用白色，这里我们用 BackgroundColor
-            var bgColor = element.BackgroundColor ?? Core.Color.Transparent; // 如果没有背景色，Input 默认可能透或者是白？通常 Input 是白的
-            if (!element.BackgroundColor.HasValue) bgColor = new Core.Color(255, 255, 255, 255);
-            
-            int colorRef = (bgColor.B << 16) | (bgColor.G << 8) | bgColor.R;
-            element.NativeBrushHandle = NativeInterop.CreateSolidBrush(colorRef);
 
             // 触发重绘以应用颜色
             NativeInterop.InvalidateRect(element.EditHwnd, 0, true);
@@ -827,7 +764,7 @@ namespace EchoUI.Render.Win32
             if (_editElements.TryGetValue(editHwnd, out var element))
             {
                 element.IsFocused = isFocused;
-                RequestRepaint();
+                RequestRepaint(element);
             }
         }
 
@@ -852,16 +789,8 @@ namespace EchoUI.Render.Win32
             {
                 _editElements.Remove(element.EditHwnd);
 
-                if (element.NativeFontHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeFontHandle);
-                    element.NativeFontHandle = 0;
-                }
-                if (element.NativeBrushHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeBrushHandle);
-                    element.NativeBrushHandle = 0;
-                }
+                element.NativeFontHandle = 0;
+                element.NativeBrushHandle = 0;
 
                 if (NativeInterop.IsWindow(element.EditHwnd))
                     NativeInterop.DestroyWindow(element.EditHwnd);
@@ -869,22 +798,18 @@ namespace EchoUI.Render.Win32
             }
             else
             {
-                if (element.NativeFontHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeFontHandle);
-                    element.NativeFontHandle = 0;
-                }
-                if (element.NativeBrushHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeBrushHandle);
-                    element.NativeBrushHandle = 0;
-                }
+                element.NativeFontHandle = 0;
+                element.NativeBrushHandle = 0;
             }
 
-            if (element.NativeImage != null)
+            GdiPainter.ReleaseCachedResources(element);
+
+            if (element.NativeImageHandle != 0)
             {
-                element.NativeImage.Dispose();
-                element.NativeImage = null;
+                NativeInterop.DeleteObject(element.NativeImageHandle);
+                element.NativeImageHandle = 0;
+                element.NativeImageWidth = 0;
+                element.NativeImageHeight = 0;
             }
         }
 
@@ -897,6 +822,7 @@ namespace EchoUI.Render.Win32
 
             if (_rootElement != null)
             {
+                _hitTestManager?.DetachSubtree(_rootElement);
                 ReleaseElementTree(_rootElement);
                 _rootElement = null;
             }
@@ -914,18 +840,53 @@ namespace EchoUI.Render.Win32
         {
             if (_rootElement == null || _window.Hwnd == 0) return;
 
+            _layoutValid = false;
+            NativeInterop.GetClientRect(_window.Hwnd, out var rect);
+            EnsureLayout(rect.Width, rect.Height);
+            NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+        }
+
+        internal void RequestScrollReposition(Win32Element scrollTarget)
+        {
+            if (_rootElement == null || _window.Hwnd == 0)
+                return;
+
             NativeInterop.GetClientRect(_window.Hwnd, out var rect);
             float vpW = rect.Width;
             float vpH = rect.Height;
+            if (vpW <= 0 || vpH <= 0)
+                return;
 
-            if (vpW > 0 && vpH > 0)
+            if (!_layoutValid || !_layoutViewportWidth.Equals(vpW) || !_layoutViewportHeight.Equals(vpH))
             {
-                FlexLayout.ComputeLayout(_rootElement, vpW, vpH);
-                UpdateEditPositions(_rootElement, vpW, vpH);
-                CollectFloatingElements();
+                RequestRelayout();
+                return;
             }
 
-            NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+            FlexLayout.UpdateAbsoluteLayout(scrollTarget);
+            UpdateEditPositions(scrollTarget, vpW, vpH);
+            RequestRepaint(scrollTarget);
+        }
+
+        internal void EnsureLayout(float vpW, float vpH)
+        {
+            if (_rootElement == null || vpW <= 0 || vpH <= 0)
+                return;
+
+            if (_layoutValid && _layoutViewportWidth.Equals(vpW) && _layoutViewportHeight.Equals(vpH))
+                return;
+
+            if (!_layoutViewportWidth.Equals(vpW) || !_layoutViewportHeight.Equals(vpH))
+            {
+                _layoutCacheGeneration++;
+            }
+
+            FlexLayout.ComputeLayout(_rootElement, vpW, vpH, _layoutCacheGeneration);
+            UpdateEditPositions(_rootElement, vpW, vpH);
+            CollectFloatingElements();
+            _layoutViewportWidth = vpW;
+            _layoutViewportHeight = vpH;
+            _layoutValid = true;
         }
 
         private void CollectFloatingElements()
@@ -974,6 +935,51 @@ namespace EchoUI.Render.Win32
                 NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
         }
 
+        internal void RequestRepaint(Win32Element? element)
+        {
+            if (_window.Hwnd == 0)
+                return;
+
+            if (element == null || element.LayoutWidth <= 0 || element.LayoutHeight <= 0)
+            {
+                NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+                return;
+            }
+
+            InvalidateElementBounds(element);
+        }
+
+        internal void RequestRepaint(Win32Element? first, Win32Element? second)
+        {
+            if (_window.Hwnd == 0)
+                return;
+
+            if (first == null && second == null)
+            {
+                NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+                return;
+            }
+
+            if (first != null)
+                InvalidateElementBounds(first);
+            if (second != null && !ReferenceEquals(first, second))
+                InvalidateElementBounds(second);
+        }
+
+        private void InvalidateElementBounds(Win32Element element)
+        {
+            const int padding = 3;
+            var rect = new NativeInterop.RECT
+            {
+                Left = (int)Math.Floor(element.AbsoluteX) - padding,
+                Top = (int)Math.Floor(element.AbsoluteY) - padding,
+                Right = (int)Math.Ceiling(element.AbsoluteX + element.LayoutWidth) + padding,
+                Bottom = (int)Math.Ceiling(element.AbsoluteY + element.LayoutHeight) + padding
+            };
+
+            NativeInterop.InvalidateRect(_window.Hwnd, ref rect, false);
+        }
+
         /// <summary>
         /// 更新所有 Edit 控件的位置以匹配布局结果（公开方法供 Win32Window 调用）
         /// </summary>
@@ -1005,9 +1011,9 @@ namespace EchoUI.Render.Win32
                 int w = (int)Math.Ceiling(contentW);
                 int h = Math.Max(1, (int)Math.Round(editH, MidpointRounding.AwayFromZero));
 
-                var editRect = new RectangleF(x, y, w, h);
+                var editRect = new RectF(x, y, w, h);
                 var clipRect = GetEditClipRect(element, vpW, vpH);
-                var visibleRect = RectangleF.Intersect(editRect, clipRect);
+                var visibleRect = RectF.Intersect(editRect, clipRect);
 
                 if (visibleRect.Width <= 0 || visibleRect.Height <= 0 || w <= 0 || h <= 0)
                 {
@@ -1033,16 +1039,16 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private RectangleF GetEditClipRect(Win32Element element, float vpW, float vpH)
+        private RectF GetEditClipRect(Win32Element element, float vpW, float vpH)
         {
-            var clipRect = new RectangleF(0, 0, vpW, vpH);
+            var clipRect = new RectF(0, 0, vpW, vpH);
             var current = element.Parent;
 
             while (current != null)
             {
                 if (current.Overflow != Overflow.Visible)
                 {
-                    clipRect = RectangleF.Intersect(clipRect, current.GetAbsoluteBounds());
+                    clipRect = RectF.Intersect(clipRect, current.GetAbsoluteBounds());
                 }
 
                 if (current.Float)
@@ -1054,7 +1060,7 @@ namespace EchoUI.Render.Win32
             return clipRect;
         }
 
-        private static void ApplyEditClipRegion(nint hwnd, RectangleF editRect, RectangleF visibleRect)
+        private static void ApplyEditClipRegion(nint hwnd, RectF editRect, RectF visibleRect)
         {
             if (visibleRect.Left <= editRect.Left && visibleRect.Top <= editRect.Top &&
                 visibleRect.Right >= editRect.Right && visibleRect.Bottom >= editRect.Bottom)
@@ -1080,25 +1086,7 @@ namespace EchoUI.Render.Win32
         private static float GetEditPreferredHeight(Win32Element element)
         {
             var fontSize = element.FontSize > 0 ? element.FontSize : 14f;
-            try
-            {
-                using var font = new Font(element.FontFamily ?? "Segoe UI", fontSize, ResolveFontStyle(element.FontWeight), GraphicsUnit.Pixel);
-                return (float)Math.Ceiling(font.GetHeight()) + 1f;
-            }
-            catch
-            {
-                return fontSize + 3f;
-            }
-        }
-
-        private static FontStyle ResolveFontStyle(string? fontWeight)
-        {
-            if (string.IsNullOrEmpty(fontWeight)) return FontStyle.Regular;
-
-            var weight = fontWeight.ToLowerInvariant();
-            return weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900"
-                ? FontStyle.Bold
-                : FontStyle.Regular;
+            return GdiText.GetPreferredLineHeight(element.FontFamily, fontSize, element.FontWeight) + 1f;
         }
 
         private static float GetBorderInset(Win32Element element)
@@ -1154,10 +1142,14 @@ namespace EchoUI.Render.Win32
                     if (File.Exists(p1)) path = p1;
                 }
 
-                if (path != null)
+                if (path != null && WicImageLoader.TryLoadBitmap(path, out var bitmap, out var width, out var height))
                 {
-                    if (element.NativeImage != null) element.NativeImage.Dispose();
-                    element.NativeImage = Image.FromFile(path);
+                    if (element.NativeImageHandle != 0)
+                        NativeInterop.DeleteObject(element.NativeImageHandle);
+
+                    element.NativeImageHandle = bitmap;
+                    element.NativeImageWidth = width;
+                    element.NativeImageHeight = height;
                 }
             }
             catch { /* 忽略加载错误 */ }

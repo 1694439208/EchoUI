@@ -1,8 +1,24 @@
-using System.Drawing;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
 {
+    internal readonly record struct RectF(float X, float Y, float Width, float Height)
+    {
+        public float Left => X;
+        public float Top => Y;
+        public float Right => X + Width;
+        public float Bottom => Y + Height;
+
+        public static RectF Intersect(RectF a, RectF b)
+        {
+            var left = Math.Max(a.Left, b.Left);
+            var top = Math.Max(a.Top, b.Top);
+            var right = Math.Min(a.Right, b.Right);
+            var bottom = Math.Min(a.Bottom, b.Bottom);
+            return new RectF(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+        }
+    }
+
     /// <summary>
     /// Win32 自绘元素节点，存储布局结果、样式属性和事件处理器。
     /// 每个 Win32Element 对应 EchoUI 元素树中的一个原生元素。
@@ -35,6 +51,7 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public float AbsoluteX { get; set; }
         public float AbsoluteY { get; set; }
+        public RectF AbsoluteBounds { get; private set; }
 
         // --- 尺寸属性 ---
         public Dimension? Width { get; set; }
@@ -108,19 +125,42 @@ namespace EchoUI.Render.Win32
         public bool IsHovered { get; set; }
         public bool IsFocused { get; set; }
 
+        public nint NativeImageHandle { get; set; }
+        public int NativeImageWidth { get; set; }
+        public int NativeImageHeight { get; set; }
+
+        public nint RoundedFillPath { get; set; }
+        public RectF RoundedFillPathBounds { get; set; }
+        public float RoundedFillPathRadius { get; set; } = -1;
+        public nint RoundedBorderPath { get; set; }
+        public RectF RoundedBorderPathBounds { get; set; }
+        public float RoundedBorderPathRadius { get; set; } = -1;
+
+        public float CachedContentWidth { get; set; }
+        public float CachedContentHeight { get; set; }
+        public int IntrinsicWidthCacheVersion { get; set; } = -1;
+        public float IntrinsicWidthCacheConstraint { get; set; }
+        public float CachedIntrinsicWidth { get; set; }
+        public int IntrinsicHeightCacheVersion { get; set; } = -1;
+        public float IntrinsicHeightCacheConstraint { get; set; }
+        public float CachedIntrinsicHeight { get; set; }
+
         public Win32Element(string elementType)
         {
             ElementType = elementType;
         }
 
-        public Image? NativeImage { get; set; }
-
         /// <summary>
         /// 获取元素在窗口中的绝对边界矩形
         /// </summary>
-        public RectangleF GetAbsoluteBounds()
+        public void UpdateAbsoluteBounds()
         {
-            return new RectangleF(AbsoluteX, AbsoluteY, LayoutWidth, LayoutHeight);
+            AbsoluteBounds = new RectF(AbsoluteX, AbsoluteY, LayoutWidth, LayoutHeight);
+        }
+
+        public RectF GetAbsoluteBounds()
+        {
+            return AbsoluteBounds;
         }
     }
 }
