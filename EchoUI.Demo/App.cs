@@ -36,7 +36,7 @@ public static Element App() {
 
     public static Element? Render(Props props)
     {
-        return Dashboard.Create(props);
+        return AnimationDemo.Create(props);
         //var tabsContent = Memo(() => new List<Element>
         //{
         //    Create(Counter, new()
