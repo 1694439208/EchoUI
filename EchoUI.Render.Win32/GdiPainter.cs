@@ -124,13 +124,18 @@ namespace EchoUI.Render.Win32
             var previousClipRect = s_effectiveClipRect;
             var clipChanged = false;
 
-            if (element.Overflow != Overflow.Visible)
+            try
             {
-                savedState = NativeInterop.SaveDC(hdc);
-                var clipRegion = RectF.Intersect(bounds, clipRect);
-
-                if (clipRegion.Width > 0 && clipRegion.Height > 0)
+                if (element.Overflow != Overflow.Visible)
                 {
+                    savedState = NativeInterop.SaveDC(hdc);
+                    var clipRegion = RectF.Intersect(bounds, clipRect);
+
+                    if (clipRegion.Width <= 0 || clipRegion.Height <= 0)
+                    {
+                        return;
+                    }
+
                     var clip = ToRect(clipRegion);
                     NativeInterop.IntersectClipRect(hdc, clip.Left, clip.Top, clip.Right, clip.Bottom);
                     gdiPlusState = GdiPlus.SaveGraphics();
@@ -139,32 +144,28 @@ namespace EchoUI.Render.Win32
                     s_effectiveClipRect = clipRegion;
                     clipChanged = true;
                 }
-                else
+
+                foreach (var child in element.Children)
                 {
-                    if (savedState != 0)
-                        NativeInterop.RestoreDC(hdc, savedState);
-                    return;
+                    PaintElement(hdc, child, childClip, skippedElements);
                 }
             }
-
-            foreach (var child in element.Children)
+            finally
             {
-                PaintElement(hdc, child, childClip, skippedElements);
-            }
+                if (clipChanged)
+                {
+                    s_effectiveClipRect = previousClipRect;
+                }
 
-            if (clipChanged)
-            {
-                s_effectiveClipRect = previousClipRect;
-            }
+                if (gdiPlusState != 0)
+                {
+                    GdiPlus.RestoreGraphics(gdiPlusState);
+                }
 
-            if (gdiPlusState != 0)
-            {
-                GdiPlus.RestoreGraphics(gdiPlusState);
-            }
-
-            if (savedState != 0)
-            {
-                NativeInterop.RestoreDC(hdc, savedState);
+                if (savedState != 0)
+                {
+                    NativeInterop.RestoreDC(hdc, savedState);
+                }
             }
 
             if (element.Overflow == Overflow.Auto || element.Overflow == Overflow.Scroll)
@@ -558,8 +559,11 @@ namespace EchoUI.Render.Win32
 
     internal static class GdiResourceCache
     {
+        private const int MaxSolidBrushes = 256;
+
         private static readonly object Lock = new();
-        private static readonly Dictionary<int, nint> SolidBrushes = [];
+        private static readonly Dictionary<int, SolidBrushCacheEntry> SolidBrushes = [];
+        private static readonly LinkedList<int> SolidBrushLru = new();
 
         static GdiResourceCache()
         {
@@ -570,14 +574,45 @@ namespace EchoUI.Render.Win32
         {
             lock (Lock)
             {
-                if (SolidBrushes.TryGetValue(colorRef, out var brush))
-                    return brush;
+                if (SolidBrushes.TryGetValue(colorRef, out var entry))
+                {
+                    Touch(entry);
+                    return entry.Handle;
+                }
 
-                brush = NativeInterop.CreateSolidBrush(colorRef);
-                if (brush != 0)
-                    SolidBrushes[colorRef] = brush;
+                var brush = NativeInterop.CreateSolidBrush(colorRef);
+                if (brush == 0)
+                    return 0;
 
+                var node = SolidBrushLru.AddFirst(colorRef);
+                SolidBrushes[colorRef] = new SolidBrushCacheEntry(brush, node);
+                TrimSolidBrushes();
                 return brush;
+            }
+        }
+
+        private static void Touch(SolidBrushCacheEntry entry)
+        {
+            if (!ReferenceEquals(entry.Node, SolidBrushLru.First))
+            {
+                SolidBrushLru.Remove(entry.Node);
+                SolidBrushLru.AddFirst(entry.Node);
+            }
+        }
+
+        private static void TrimSolidBrushes()
+        {
+            while (SolidBrushes.Count > MaxSolidBrushes)
+            {
+                var node = SolidBrushLru.Last;
+                if (node == null)
+                    break;
+
+                SolidBrushLru.RemoveLast();
+                if (SolidBrushes.Remove(node.Value, out var entry) && entry.Handle != 0)
+                {
+                    NativeInterop.DeleteObject(entry.Handle);
+                }
             }
         }
 
@@ -585,11 +620,18 @@ namespace EchoUI.Render.Win32
         {
             lock (Lock)
             {
-                foreach (var brush in SolidBrushes.Values)
-                    NativeInterop.DeleteObject(brush);
+                foreach (var entry in SolidBrushes.Values)
+                    NativeInterop.DeleteObject(entry.Handle);
 
                 SolidBrushes.Clear();
+                SolidBrushLru.Clear();
             }
+        }
+
+        private sealed class SolidBrushCacheEntry(nint handle, LinkedListNode<int> node)
+        {
+            public nint Handle { get; } = handle;
+            public LinkedListNode<int> Node { get; } = node;
         }
     }
 

@@ -667,12 +667,6 @@ namespace EchoUI.Render.Win32
                 NativeInterop.SendMessage(element.EditHwnd, NativeInterop.WM_SETFONT, fontHandle, 1);
             }
 
-            var bgColor = element.BackgroundColor ?? Core.Color.Transparent;
-            if (!element.BackgroundColor.HasValue) bgColor = new Core.Color(255, 255, 255, 255);
-            
-            int colorRef = (bgColor.B << 16) | (bgColor.G << 8) | bgColor.R;
-            element.NativeBrushHandle = GdiResourceCache.GetSolidBrush(colorRef);
-
             // 触发重绘以应用颜色
             NativeInterop.InvalidateRect(element.EditHwnd, 0, true);
         }
@@ -807,6 +801,28 @@ namespace EchoUI.Render.Win32
             NativeInterop.GetClientRect(_window.Hwnd, out var rect);
             EnsureLayout(rect.Width, rect.Height);
             NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+        }
+
+        internal void RequestScrollReposition(Win32Element scrollTarget)
+        {
+            if (_rootElement == null || _window.Hwnd == 0)
+                return;
+
+            NativeInterop.GetClientRect(_window.Hwnd, out var rect);
+            float vpW = rect.Width;
+            float vpH = rect.Height;
+            if (vpW <= 0 || vpH <= 0)
+                return;
+
+            if (!_layoutValid || !_layoutViewportWidth.Equals(vpW) || !_layoutViewportHeight.Equals(vpH))
+            {
+                RequestRelayout();
+                return;
+            }
+
+            FlexLayout.UpdateAbsoluteLayout(scrollTarget);
+            UpdateEditPositions(scrollTarget, vpW, vpH);
+            RequestRepaint(scrollTarget);
         }
 
         internal void EnsureLayout(float vpW, float vpH)

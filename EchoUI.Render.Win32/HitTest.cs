@@ -212,6 +212,8 @@ namespace EchoUI.Render.Win32
                 float maxScrollX = Math.Max(0, contentWidth - scrollTarget.LayoutWidth);
                 float maxScrollY = Math.Max(0, contentHeight - scrollTarget.LayoutHeight);
                 bool scrollHorizontal = (NativeInterop.GetKeyState(NativeInterop.VK_SHIFT) & 0x8000) != 0 || maxScrollY <= 0;
+                float previousScrollX = scrollTarget.ScrollOffsetX;
+                float previousScrollY = scrollTarget.ScrollOffsetY;
 
                 if (scrollHorizontal && maxScrollX > 0)
                 {
@@ -224,7 +226,10 @@ namespace EchoUI.Render.Win32
                     scrollTarget.ScrollOffsetY = Math.Clamp(scrollTarget.ScrollOffsetY, 0, maxScrollY);
                 }
 
-                _renderer.RequestRelayout();
+                if (!previousScrollX.Equals(scrollTarget.ScrollOffsetX) || !previousScrollY.Equals(scrollTarget.ScrollOffsetY))
+                {
+                    _renderer.RequestScrollReposition(scrollTarget);
+                }
             }
         }
 

@@ -31,6 +31,23 @@ namespace EchoUI.Render.Win32
             }
         }
 
+        public static void UpdateAbsoluteLayout(Win32Element root)
+        {
+            root.UpdateAbsoluteBounds();
+            UpdateAbsoluteChildren(root);
+        }
+
+        private static void UpdateAbsoluteChildren(Win32Element container)
+        {
+            foreach (var child in container.Children)
+            {
+                child.AbsoluteX = container.AbsoluteX + child.LayoutX - container.ScrollOffsetX;
+                child.AbsoluteY = container.AbsoluteY + child.LayoutY - container.ScrollOffsetY;
+                child.UpdateAbsoluteBounds();
+                UpdateAbsoluteChildren(child);
+            }
+        }
+
         private static bool ClampScrollOffsetsRecursive(Win32Element element, float vpW, float vpH)
         {
             var changed = false;

@@ -217,9 +217,10 @@ namespace EchoUI.Render.Win32
                             NativeInterop.SetBkColor(hdc, crBk); // 需要 SetBkColor
                             
                             // 返回背景画刷，用于擦除背景
-                            if (element.NativeBrushHandle != 0)
-                                return element.NativeBrushHandle;
-                            
+                            var brush = GdiResourceCache.GetSolidBrush(crBk);
+                            if (brush != 0)
+                                return brush;
+
                             return NativeInterop.GetStockObject(NativeInterop.WHITE_BRUSH);
                         }
                     }
