@@ -32,6 +32,7 @@ namespace EchoUI.Render.Win32
         private bool _layoutValid;
         private float _layoutViewportWidth;
         private float _layoutViewportHeight;
+        private int _layoutCacheGeneration = 1;
         private readonly HashSet<string> _nativeDiagnostics = [];
 
         internal Win32Element? RootElement => _rootElement;
@@ -43,6 +44,12 @@ namespace EchoUI.Render.Win32
             _window = window;
             _hitTestManager = new HitTestManager(this);
             window.SetRenderer(this);
+        }
+
+        private void InvalidateLayoutCache()
+        {
+            _layoutValid = false;
+            _layoutCacheGeneration++;
         }
 
         public object CreateElement(string type)
@@ -72,7 +79,7 @@ namespace EchoUI.Render.Win32
             UpdateEventHandlers(element, newProps);
 
             if (patch.UpdatedProperties == null) return;
-            _layoutValid = false;
+            InvalidateLayoutCache();
 
             foreach (var (propName, propValue) in patch.UpdatedProperties)
             {
@@ -126,7 +133,7 @@ namespace EchoUI.Render.Win32
             else
                 parentElement.Children.Add(childElement);
 
-            _layoutValid = false;
+            InvalidateLayoutCache();
         }
 
         public void RemoveChild(object parent, object child)
@@ -142,9 +149,10 @@ namespace EchoUI.Render.Win32
             }
 
             var childElement = (Win32Element)child;
+            _hitTestManager?.DetachSubtree(childElement);
             parentElement.Children.Remove(childElement);
             childElement.Parent = null;
-            _layoutValid = false;
+            InvalidateLayoutCache();
 
             ReleaseElementTree(childElement);
         }
@@ -169,7 +177,7 @@ namespace EchoUI.Render.Win32
             else
                 parentElement.Children.Add(childElement);
 
-            _layoutValid = false;
+            InvalidateLayoutCache();
         }
 
         public TextMeasurementResult MeasureText(TextMeasurementRequest request)
@@ -777,6 +785,7 @@ namespace EchoUI.Render.Win32
 
             if (_rootElement != null)
             {
+                _hitTestManager?.DetachSubtree(_rootElement);
                 ReleaseElementTree(_rootElement);
                 _rootElement = null;
             }
@@ -808,7 +817,12 @@ namespace EchoUI.Render.Win32
             if (_layoutValid && _layoutViewportWidth.Equals(vpW) && _layoutViewportHeight.Equals(vpH))
                 return;
 
-            FlexLayout.ComputeLayout(_rootElement, vpW, vpH);
+            if (!_layoutViewportWidth.Equals(vpW) || !_layoutViewportHeight.Equals(vpH))
+            {
+                _layoutCacheGeneration++;
+            }
+
+            FlexLayout.ComputeLayout(_rootElement, vpW, vpH, _layoutCacheGeneration);
             UpdateEditPositions(_rootElement, vpW, vpH);
             CollectFloatingElements();
             _layoutViewportWidth = vpW;

@@ -51,6 +51,7 @@ namespace EchoUI.Render.Win32
         /// </summary>
         public float AbsoluteX { get; set; }
         public float AbsoluteY { get; set; }
+        public RectF AbsoluteBounds { get; private set; }
 
         // --- 尺寸属性 ---
         public Dimension? Width { get; set; }
@@ -135,6 +136,15 @@ namespace EchoUI.Render.Win32
         public RectF RoundedBorderPathBounds { get; set; }
         public float RoundedBorderPathRadius { get; set; } = -1;
 
+        public float CachedContentWidth { get; set; }
+        public float CachedContentHeight { get; set; }
+        public int IntrinsicWidthCacheVersion { get; set; } = -1;
+        public float IntrinsicWidthCacheConstraint { get; set; }
+        public float CachedIntrinsicWidth { get; set; }
+        public int IntrinsicHeightCacheVersion { get; set; } = -1;
+        public float IntrinsicHeightCacheConstraint { get; set; }
+        public float CachedIntrinsicHeight { get; set; }
+
         public Win32Element(string elementType)
         {
             ElementType = elementType;
@@ -143,9 +153,14 @@ namespace EchoUI.Render.Win32
         /// <summary>
         /// 获取元素在窗口中的绝对边界矩形
         /// </summary>
+        public void UpdateAbsoluteBounds()
+        {
+            AbsoluteBounds = new RectF(AbsoluteX, AbsoluteY, LayoutWidth, LayoutHeight);
+        }
+
         public RectF GetAbsoluteBounds()
         {
-            return new RectF(AbsoluteX, AbsoluteY, LayoutWidth, LayoutHeight);
+            return AbsoluteBounds;
         }
     }
 }

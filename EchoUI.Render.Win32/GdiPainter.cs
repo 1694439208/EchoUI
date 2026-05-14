@@ -353,6 +353,9 @@ namespace EchoUI.Render.Win32
         {
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
+            if (radius <= 0 && style == Core.BorderStyle.Solid && CpuRasterizer.TryDrawRectBorder(s_bitmapSurface, s_effectiveClipRect, rect, color, width))
+                return;
+
             if (radius > 0 && GdiPlus.DrawRoundedRectangle(element, rect, color, width, radius, style))
                 return;
 
@@ -448,6 +451,32 @@ namespace EchoUI.Render.Win32
             var rowStart = (byte*)surface.Value.Bits + top * surface.Value.Stride + left * sizeof(uint);
             FillRectCore(rowStart, surface.Value.Stride, width, height, packedColor);
             return true;
+        }
+
+        public static bool TryDrawRectBorder(CpuBitmapSurface? surface, RectF clipRect, RectF rect, Core.Color color, float width)
+        {
+            if (!surface.HasValue || !surface.Value.IsValid || color.A == 0 || width <= 0)
+                return false;
+
+            int thickness = Math.Max(1, (int)Math.Ceiling(width));
+            if (thickness * 2 >= rect.Width || thickness * 2 >= rect.Height)
+                return TryFillRect(surface, clipRect, rect, color);
+
+            var top = new RectF(rect.X, rect.Y, rect.Width, thickness);
+            var bottom = new RectF(rect.X, rect.Bottom - thickness, rect.Width, thickness);
+            var sideHeight = Math.Max(0, rect.Height - thickness * 2);
+            var left = new RectF(rect.X, rect.Y + thickness, thickness, sideHeight);
+            var right = new RectF(rect.Right - thickness, rect.Y + thickness, thickness, sideHeight);
+
+            var drawn = TryFillRect(surface, clipRect, top, color);
+            drawn |= TryFillRect(surface, clipRect, bottom, color);
+            if (sideHeight > 0)
+            {
+                drawn |= TryFillRect(surface, clipRect, left, color);
+                drawn |= TryFillRect(surface, clipRect, right, color);
+            }
+
+            return drawn;
         }
 
         private static unsafe void FillRectCore(byte* rowStart, int stride, int width, int height, uint packedColor)
@@ -953,6 +982,7 @@ namespace EchoUI.Render.Win32
         private const int MaxMeasureCacheEntries = 4096;
         private static readonly object CacheLock = new();
         private static readonly Dictionary<FontKey, nint> Fonts = [];
+        private static readonly Dictionary<FontKey, float> LineHeights = [];
         private static readonly Dictionary<TextMeasureKey, TextMeasurementResult> MeasureCache = [];
 
         static GdiText()
@@ -965,12 +995,27 @@ namespace EchoUI.Render.Win32
             text ??= string.Empty;
             fontSize = fontSize > 0 ? fontSize : 14f;
             var resolvedFamily = ResolveFontFamily(fontFamily, text);
+            var fontKey = FontKey.Create(resolvedFamily, fontSize, fontWeight);
             var key = TextMeasureKey.Create(text, resolvedFamily, fontSize, fontWeight, widthConstraint, noWrap);
 
             lock (CacheLock)
             {
                 if (MeasureCache.TryGetValue(key, out var cached))
                     return cached;
+            }
+
+            if (text.Length == 0)
+            {
+                var emptyResult = new TextMeasurementResult(0, GetOrCreateLineHeight(resolvedFamily, fontSize, fontWeight, fontKey));
+                lock (CacheLock)
+                {
+                    if (MeasureCache.Count >= MaxMeasureCacheEntries)
+                        MeasureCache.Clear();
+
+                    MeasureCache[key] = emptyResult;
+                }
+
+                return emptyResult;
             }
 
             var hdc = NativeInterop.GetDC(0);
@@ -982,13 +1027,15 @@ namespace EchoUI.Render.Win32
 
             try
             {
-                var lineHeight = GetLineHeight(hdc, fontSize);
-                TextMeasurementResult result;
-                if (text.Length == 0)
+                var lineHeight = GetCachedLineHeight(fontKey);
+                if (lineHeight <= 0)
                 {
-                    result = new TextMeasurementResult(0, lineHeight);
+                    lineHeight = GetLineHeight(hdc, fontSize);
+                    CacheLineHeight(fontKey, lineHeight);
                 }
-                else if (noWrap || widthConstraint == null || widthConstraint <= 0)
+
+                TextMeasurementResult result;
+                if (noWrap || widthConstraint == null || widthConstraint <= 0)
                 {
                     result = NativeInterop.GetTextExtentPoint32(hdc, text, text.Length, out var size)
                         ? new TextMeasurementResult(size.cx, Math.Max(lineHeight, size.cy))
@@ -1102,8 +1149,9 @@ namespace EchoUI.Render.Win32
 
         public static float GetPreferredLineHeight(string? fontFamily, float fontSize, string? fontWeight)
         {
-            var result = MeasureText(string.Empty, fontFamily, fontSize, fontWeight);
-            return result.Height;
+            fontSize = fontSize > 0 ? fontSize : 14f;
+            var resolvedFamily = ResolveFontFamily(fontFamily, null);
+            return GetOrCreateLineHeight(resolvedFamily, fontSize, fontWeight, FontKey.Create(resolvedFamily, fontSize, fontWeight));
         }
 
         private static void ClearCaches()
@@ -1114,7 +1162,54 @@ namespace EchoUI.Render.Win32
                     NativeInterop.DeleteObject(font);
 
                 Fonts.Clear();
+                LineHeights.Clear();
                 MeasureCache.Clear();
+            }
+        }
+
+        private static float GetCachedLineHeight(FontKey key)
+        {
+            lock (CacheLock)
+            {
+                return LineHeights.TryGetValue(key, out var lineHeight) ? lineHeight : 0;
+            }
+        }
+
+        private static void CacheLineHeight(FontKey key, float lineHeight)
+        {
+            if (lineHeight <= 0)
+                return;
+
+            lock (CacheLock)
+            {
+                LineHeights[key] = lineHeight;
+            }
+        }
+
+        private static float GetOrCreateLineHeight(string resolvedFamily, float fontSize, string? fontWeight, FontKey key)
+        {
+            var cached = GetCachedLineHeight(key);
+            if (cached > 0)
+                return cached;
+
+            var hdc = NativeInterop.GetDC(0);
+            if (hdc == 0)
+                return fontSize + 3f;
+
+            var font = GetFontHandle(resolvedFamily, fontSize, fontWeight);
+            var oldFont = font != 0 ? NativeInterop.SelectObject(hdc, font) : 0;
+
+            try
+            {
+                var lineHeight = GetLineHeight(hdc, fontSize);
+                CacheLineHeight(key, lineHeight);
+                return lineHeight;
+            }
+            finally
+            {
+                if (oldFont != 0)
+                    NativeInterop.SelectObject(hdc, oldFont);
+                NativeInterop.ReleaseDC(0, hdc);
             }
         }
 
