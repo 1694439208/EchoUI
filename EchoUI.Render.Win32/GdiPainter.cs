@@ -1,28 +1,73 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
 {
+    internal readonly record struct CpuBitmapSurface(nint Bits, int Width, int Height, int Stride)
+    {
+        public bool IsValid => Bits != 0 && Width > 0 && Height > 0 && Stride >= Width * sizeof(uint);
+    }
+
     /// <summary>
     /// GDI 绘制引擎，遍历 Win32Element 树并绘制到 HDC。
     /// </summary>
     internal static class GdiPainter
     {
-        public static void Paint(nint hdc, Win32Element root, IReadOnlyCollection<Win32Element>? floatingElements, float viewportWidth, float viewportHeight)
+        [ThreadStatic]
+        private static CpuBitmapSurface? s_bitmapSurface;
+
+        [ThreadStatic]
+        private static RectF s_effectiveClipRect;
+
+        public static void Paint(nint hdc, Win32Element root, IReadOnlyCollection<Win32Element>? floatingElements, float viewportWidth, float viewportHeight, RectF? dirtyRect = null, CpuBitmapSurface? bitmapSurface = null)
         {
             using var gdiPlusScope = GdiPlus.BeginDraw(hdc);
             var viewportRect = new RectF(0, 0, viewportWidth, viewportHeight);
-            FillSolidRect(hdc, viewportRect, Core.Color.White);
+            var paintRect = dirtyRect.HasValue ? RectF.Intersect(viewportRect, dirtyRect.Value) : viewportRect;
+            if (paintRect.Width <= 0 || paintRect.Height <= 0)
+                return;
 
-            PaintElement(hdc, root, viewportRect, floatingElements);
+            var savedState = NativeInterop.SaveDC(hdc);
+            var gdiPlusState = GdiPlus.SaveGraphics();
+            var previousSurface = s_bitmapSurface;
+            var previousClipRect = s_effectiveClipRect;
 
-            if (floatingElements != null)
+            try
             {
-                foreach (var floatElem in floatingElements)
+                s_bitmapSurface = bitmapSurface.HasValue && bitmapSurface.Value.IsValid ? bitmapSurface : null;
+                s_effectiveClipRect = paintRect;
+                var clip = ToRect(paintRect);
+                NativeInterop.IntersectClipRect(hdc, clip.Left, clip.Top, clip.Right, clip.Bottom);
+                GdiPlus.IntersectClip(paintRect);
+
+                FillSolidRect(hdc, paintRect, Core.Color.White);
+
+                PaintElement(hdc, root, paintRect, floatingElements);
+
+                if (floatingElements != null)
                 {
-                    PaintElement(hdc, floatElem, viewportRect, null);
+                    foreach (var floatElem in floatingElements)
+                    {
+                        PaintElement(hdc, floatElem, paintRect, null);
+                    }
                 }
             }
+            finally
+            {
+                s_bitmapSurface = previousSurface;
+                s_effectiveClipRect = previousClipRect;
+                GdiPlus.RestoreGraphics(gdiPlusState);
+                if (savedState != 0)
+                    NativeInterop.RestoreDC(hdc, savedState);
+            }
+        }
+
+        public static void ReleaseCachedResources(Win32Element element)
+        {
+            GdiPlus.ReleaseElementPaths(element);
         }
 
         private static void PaintElement(nint hdc, Win32Element element, RectF clipRect, IReadOnlyCollection<Win32Element>? skippedElements)
@@ -65,17 +110,19 @@ namespace EchoUI.Render.Win32
 
             if (hasDrawableBounds && element.BackgroundColor.HasValue && element.BackgroundColor.Value.A > 0)
             {
-                FillShape(hdc, bounds, element.BackgroundColor.Value, element.BorderRadius);
+                FillShape(hdc, element, bounds, element.BackgroundColor.Value, element.BorderRadius);
             }
 
             if (hasDrawableBounds && element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
             {
-                DrawBorder(hdc, bounds, element.BorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
+                DrawBorder(hdc, element, bounds, element.BorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
             }
 
             var childClip = clipRect;
             var savedState = 0;
             uint gdiPlusState = 0;
+            var previousClipRect = s_effectiveClipRect;
+            var clipChanged = false;
 
             if (element.Overflow != Overflow.Visible)
             {
@@ -89,6 +136,8 @@ namespace EchoUI.Render.Win32
                     gdiPlusState = GdiPlus.SaveGraphics();
                     GdiPlus.IntersectClip(clipRegion);
                     childClip = clipRegion;
+                    s_effectiveClipRect = clipRegion;
+                    clipChanged = true;
                 }
                 else
                 {
@@ -101,6 +150,11 @@ namespace EchoUI.Render.Win32
             foreach (var child in element.Children)
             {
                 PaintElement(hdc, child, childClip, skippedElements);
+            }
+
+            if (clipChanged)
+            {
+                s_effectiveClipRect = previousClipRect;
             }
 
             if (gdiPlusState != 0)
@@ -135,7 +189,7 @@ namespace EchoUI.Render.Win32
 
             if (element.BackgroundColor.HasValue)
             {
-                FillShape(hdc, bounds, element.BackgroundColor.Value, element.BorderRadius);
+                FillShape(hdc, element, bounds, element.BackgroundColor.Value, element.BorderRadius);
             }
 
             var effectiveBorderColor = element.IsFocused && element.FocusedBorderColor.HasValue
@@ -144,7 +198,7 @@ namespace EchoUI.Render.Win32
 
             if (element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && effectiveBorderColor.HasValue)
             {
-                DrawBorder(hdc, bounds, effectiveBorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
+                DrawBorder(hdc, element, bounds, effectiveBorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
             }
         }
 
@@ -168,7 +222,7 @@ namespace EchoUI.Render.Win32
                 var trackRect = new RectF(bounds.Right - scrollbarSize - 2, bounds.Y, scrollbarSize, trackHeight);
                 if (alwaysShow && trackRect.Width > 0 && trackRect.Height > 0)
                 {
-                    FillShape(hdc, trackRect, trackColor, scrollbarSize / 2);
+                    FillShape(hdc, null, trackRect, trackColor, scrollbarSize / 2);
                 }
 
                 var maxScroll = Math.Max(0, contentHeight - element.LayoutHeight);
@@ -182,7 +236,7 @@ namespace EchoUI.Render.Win32
 
                 if (thumbRect.Width > 0 && thumbRect.Height > 0)
                 {
-                    FillShape(hdc, thumbRect, thumbColor, scrollbarSize / 2);
+                    FillShape(hdc, null, thumbRect, thumbColor, scrollbarSize / 2);
                 }
             }
 
@@ -192,7 +246,7 @@ namespace EchoUI.Render.Win32
                 var trackRect = new RectF(bounds.X, bounds.Bottom - scrollbarSize - 2, trackWidth, scrollbarSize);
                 if (alwaysShow && trackRect.Width > 0 && trackRect.Height > 0)
                 {
-                    FillShape(hdc, trackRect, trackColor, scrollbarSize / 2);
+                    FillShape(hdc, null, trackRect, trackColor, scrollbarSize / 2);
                 }
 
                 var maxScroll = Math.Max(0, contentWidth - element.LayoutWidth);
@@ -206,7 +260,7 @@ namespace EchoUI.Render.Win32
 
                 if (thumbRect.Width > 0 && thumbRect.Height > 0)
                 {
-                    FillShape(hdc, thumbRect, thumbColor, scrollbarSize / 2);
+                    FillShape(hdc, null, thumbRect, thumbColor, scrollbarSize / 2);
                 }
             }
         }
@@ -250,21 +304,17 @@ namespace EchoUI.Render.Win32
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
             GdiPlus.Flush();
-            var brush = NativeInterop.CreateSolidBrush(ToColorRef(color));
+            if (CpuRasterizer.TryFillRect(s_bitmapSurface, s_effectiveClipRect, rect, color))
+                return;
+
+            var brush = GdiResourceCache.GetSolidBrush(ToColorRef(color));
             if (brush == 0) return;
 
-            try
-            {
-                var nativeRect = ToRect(rect);
-                NativeInterop.FillRect(hdc, ref nativeRect, brush);
-            }
-            finally
-            {
-                NativeInterop.DeleteObject(brush);
-            }
+            var nativeRect = ToRect(rect);
+            NativeInterop.FillRect(hdc, ref nativeRect, brush);
         }
 
-        private static void FillShape(nint hdc, RectF rect, Core.Color color, float radius)
+        private static void FillShape(nint hdc, Win32Element? element, RectF rect, Core.Color color, float radius)
         {
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
@@ -274,11 +324,11 @@ namespace EchoUI.Render.Win32
                 return;
             }
 
-            if (GdiPlus.FillRoundedRectangle(rect, color, radius))
+            if (GdiPlus.FillRoundedRectangle(element, rect, color, radius))
                 return;
 
             GdiPlus.Flush();
-            var brush = NativeInterop.CreateSolidBrush(ToColorRef(color));
+            var brush = GdiResourceCache.GetSolidBrush(ToColorRef(color));
             if (brush == 0) return;
 
             var oldBrush = NativeInterop.SelectObject(hdc, brush);
@@ -296,15 +346,14 @@ namespace EchoUI.Render.Win32
                     NativeInterop.SelectObject(hdc, oldBrush);
                 if (oldPen != 0)
                     NativeInterop.SelectObject(hdc, oldPen);
-                NativeInterop.DeleteObject(brush);
             }
         }
 
-        private static void DrawBorder(nint hdc, RectF rect, Core.Color color, float width, float radius, Core.BorderStyle style)
+        private static void DrawBorder(nint hdc, Win32Element? element, RectF rect, Core.Color color, float width, float radius, Core.BorderStyle style)
         {
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
-            if (radius > 0 && GdiPlus.DrawRoundedRectangle(rect, color, width, radius, style))
+            if (radius > 0 && GdiPlus.DrawRoundedRectangle(element, rect, color, width, radius, style))
                 return;
 
             GdiPlus.Flush();
@@ -374,6 +423,147 @@ namespace EchoUI.Render.Win32
         }
     }
 
+    internal static class CpuRasterizer
+    {
+        public static unsafe bool TryFillRect(CpuBitmapSurface? surface, RectF clipRect, RectF rect, Core.Color color)
+        {
+            if (!surface.HasValue || !surface.Value.IsValid || color.A == 0)
+                return false;
+
+            var targetRect = RectF.Intersect(RectF.Intersect(new RectF(0, 0, surface.Value.Width, surface.Value.Height), clipRect), rect);
+            if (targetRect.Width <= 0 || targetRect.Height <= 0)
+                return false;
+
+            int left = Math.Max(0, (int)Math.Floor(targetRect.Left));
+            int top = Math.Max(0, (int)Math.Floor(targetRect.Top));
+            int right = Math.Min(surface.Value.Width, (int)Math.Ceiling(targetRect.Right));
+            int bottom = Math.Min(surface.Value.Height, (int)Math.Ceiling(targetRect.Bottom));
+            int width = right - left;
+            int height = bottom - top;
+
+            if (width <= 0 || height <= 0)
+                return false;
+
+            var packedColor = ToOpaqueBgra(color);
+            var rowStart = (byte*)surface.Value.Bits + top * surface.Value.Stride + left * sizeof(uint);
+            FillRectCore(rowStart, surface.Value.Stride, width, height, packedColor);
+            return true;
+        }
+
+        private static unsafe void FillRectCore(byte* rowStart, int stride, int width, int height, uint packedColor)
+        {
+            if (Avx2.IsSupported && width >= 8)
+            {
+                var vector = Vector256.Create(packedColor).AsSingle();
+                for (int y = 0; y < height; y++)
+                {
+                    var row = (uint*)(rowStart + y * stride);
+                    int x = 0;
+                    int simdLimit = width - 8;
+                    for (; x <= simdLimit; x += 8)
+                    {
+                        Avx.Store((float*)(row + x), vector);
+                    }
+
+                    for (; x < width; x++)
+                    {
+                        row[x] = packedColor;
+                    }
+                }
+
+                return;
+            }
+
+            if (Sse2.IsSupported && width >= 4)
+            {
+                var vector = Vector128.Create(packedColor).AsInt32();
+                for (int y = 0; y < height; y++)
+                {
+                    var row = (uint*)(rowStart + y * stride);
+                    int x = 0;
+                    int simdLimit = width - 4;
+                    for (; x <= simdLimit; x += 4)
+                    {
+                        Sse2.Store((int*)(row + x), vector);
+                    }
+
+                    for (; x < width; x++)
+                    {
+                        row[x] = packedColor;
+                    }
+                }
+
+                return;
+            }
+
+            for (int y = 0; y < height; y++)
+            {
+                var row = (uint*)(rowStart + y * stride);
+                for (int x = 0; x < width; x++)
+                {
+                    row[x] = packedColor;
+                }
+            }
+        }
+
+        private static uint ToOpaqueBgra(Core.Color color)
+        {
+            if (color.A < 255)
+            {
+                color = BlendOverWhite(color);
+            }
+
+            return ((uint)255 << 24) | ((uint)color.R << 16) | ((uint)color.G << 8) | color.B;
+        }
+
+        private static Core.Color BlendOverWhite(Core.Color color)
+        {
+            int alpha = color.A;
+            int inverseAlpha = 255 - alpha;
+            return new Core.Color(
+                (byte)((color.R * alpha + 255 * inverseAlpha + 127) / 255),
+                (byte)((color.G * alpha + 255 * inverseAlpha + 127) / 255),
+                (byte)((color.B * alpha + 255 * inverseAlpha + 127) / 255));
+        }
+    }
+
+    internal static class GdiResourceCache
+    {
+        private static readonly object Lock = new();
+        private static readonly Dictionary<int, nint> SolidBrushes = [];
+
+        static GdiResourceCache()
+        {
+            AppDomain.CurrentDomain.ProcessExit += static (_, _) => Clear();
+        }
+
+        public static nint GetSolidBrush(int colorRef)
+        {
+            lock (Lock)
+            {
+                if (SolidBrushes.TryGetValue(colorRef, out var brush))
+                    return brush;
+
+                brush = NativeInterop.CreateSolidBrush(colorRef);
+                if (brush != 0)
+                    SolidBrushes[colorRef] = brush;
+
+                return brush;
+            }
+        }
+
+        private static void Clear()
+        {
+            lock (Lock)
+            {
+                foreach (var brush in SolidBrushes.Values)
+                    NativeInterop.DeleteObject(brush);
+
+                SolidBrushes.Clear();
+            }
+        }
+    }
+
     internal static class GdiPlus
     {
         [ThreadStatic]
@@ -386,6 +576,9 @@ namespace EchoUI.Render.Win32
         private static bool s_needsFlush;
 
         private static readonly object StartupLock = new();
+        private static readonly object ResourceLock = new();
+        private static readonly Dictionary<uint, nint> SolidBrushes = [];
+        private static readonly Dictionary<PenKey, nint> Pens = [];
         private static nint s_token;
         private static bool s_startupAttempted;
 
@@ -411,32 +604,31 @@ namespace EchoUI.Render.Win32
             return DrawScope.Instance;
         }
 
-        public static bool FillRoundedRectangle(RectF rect, Core.Color color, float radius)
+        public static bool FillRoundedRectangle(Win32Element? element, RectF rect, Core.Color color, float radius)
         {
-            if (s_graphics == 0 || !CreateRoundedRectanglePath(rect, radius, out var path))
+            if (s_graphics == 0)
+                return false;
+
+            var ownsPath = element == null;
+            var path = ownsPath
+                ? CreateTransientRoundedPath(rect, radius)
+                : GetRoundedFillPath(element!, rect, radius);
+            if (path == 0)
                 return false;
 
             try
             {
-                if (NativeInterop.GdipCreateSolidFill(ToArgb(color), out var brush) != NativeInterop.GdipOk)
-                    return false;
-
-                try
-                {
-                    return MarkDrawn(NativeInterop.GdipFillPath(s_graphics, brush, path));
-                }
-                finally
-                {
-                    NativeInterop.GdipDeleteBrush(brush);
-                }
+                var brush = GetSolidBrush(ToArgb(color));
+                return brush != 0 && MarkDrawn(NativeInterop.GdipFillPath(s_graphics, brush, path));
             }
             finally
             {
-                NativeInterop.GdipDeletePath(path);
+                if (ownsPath)
+                    NativeInterop.GdipDeletePath(path);
             }
         }
 
-        public static bool DrawRoundedRectangle(RectF rect, Core.Color color, float width, float radius, Core.BorderStyle style)
+        public static bool DrawRoundedRectangle(Win32Element? element, RectF rect, Core.Color color, float width, float radius, Core.BorderStyle style)
         {
             if (s_graphics == 0 || style == Core.BorderStyle.None)
                 return false;
@@ -452,34 +644,37 @@ namespace EchoUI.Render.Win32
             if (strokeRect.Width <= 0 || strokeRect.Height <= 0)
                 return false;
 
-            if (!CreateRoundedRectanglePath(strokeRect, Math.Max(0, radius - inset), out var path))
+            var ownsPath = element == null;
+            var path = ownsPath
+                ? CreateTransientRoundedPath(strokeRect, Math.Max(0, radius - inset))
+                : GetRoundedBorderPath(element!, strokeRect, Math.Max(0, radius - inset));
+            if (path == 0)
                 return false;
 
             try
             {
-                if (NativeInterop.GdipCreatePen1(ToArgb(color), width, NativeInterop.UnitPixel, out var pen) != NativeInterop.GdipOk)
-                    return false;
-
-                try
-                {
-                    NativeInterop.GdipSetPenDashStyle(pen, style switch
-                    {
-                        Core.BorderStyle.Dashed => NativeInterop.DashStyleDash,
-                        Core.BorderStyle.Dotted => NativeInterop.DashStyleDot,
-                        _ => NativeInterop.DashStyleSolid
-                    });
-
-                    return MarkDrawn(NativeInterop.GdipDrawPath(s_graphics, pen, path));
-                }
-                finally
-                {
-                    NativeInterop.GdipDeletePen(pen);
-                }
+                var pen = GetPen(ToArgb(color), width, style);
+                return pen != 0 && MarkDrawn(NativeInterop.GdipDrawPath(s_graphics, pen, path));
             }
             finally
             {
-                NativeInterop.GdipDeletePath(path);
+                if (ownsPath)
+                    NativeInterop.GdipDeletePath(path);
             }
+        }
+
+        public static void ReleaseElementPaths(Win32Element element)
+        {
+            var fillPath = element.RoundedFillPath;
+            DeletePath(ref fillPath);
+            element.RoundedFillPath = fillPath;
+
+            var borderPath = element.RoundedBorderPath;
+            DeletePath(ref borderPath);
+            element.RoundedBorderPath = borderPath;
+
+            element.RoundedFillPathRadius = -1;
+            element.RoundedBorderPathRadius = -1;
         }
 
         public static uint SaveGraphics()
@@ -527,6 +722,98 @@ namespace EchoUI.Render.Win32
             }
 
             return false;
+        }
+
+        private static nint GetRoundedFillPath(Win32Element element, RectF rect, float radius)
+        {
+            if (element.RoundedFillPath != 0 && SameGeometry(element.RoundedFillPathBounds, rect) && element.RoundedFillPathRadius.Equals(radius))
+                return element.RoundedFillPath;
+
+            var cachedPath = element.RoundedFillPath;
+            DeletePath(ref cachedPath);
+            element.RoundedFillPath = cachedPath;
+            if (!CreateRoundedRectanglePath(rect, radius, out var path))
+                return 0;
+
+            element.RoundedFillPath = path;
+            element.RoundedFillPathBounds = rect;
+            element.RoundedFillPathRadius = radius;
+            return path;
+        }
+
+        private static nint GetRoundedBorderPath(Win32Element element, RectF rect, float radius)
+        {
+            if (element.RoundedBorderPath != 0 && SameGeometry(element.RoundedBorderPathBounds, rect) && element.RoundedBorderPathRadius.Equals(radius))
+                return element.RoundedBorderPath;
+
+            var cachedPath = element.RoundedBorderPath;
+            DeletePath(ref cachedPath);
+            element.RoundedBorderPath = cachedPath;
+            if (!CreateRoundedRectanglePath(rect, radius, out var path))
+                return 0;
+
+            element.RoundedBorderPath = path;
+            element.RoundedBorderPathBounds = rect;
+            element.RoundedBorderPathRadius = radius;
+            return path;
+        }
+
+        private static nint CreateTransientRoundedPath(RectF rect, float radius)
+        {
+            return CreateRoundedRectanglePath(rect, radius, out var path) ? path : 0;
+        }
+
+        private static bool SameGeometry(RectF a, RectF b)
+        {
+            return a.X.Equals(b.X) && a.Y.Equals(b.Y) && a.Width.Equals(b.Width) && a.Height.Equals(b.Height);
+        }
+
+        private static nint GetSolidBrush(uint argb)
+        {
+            lock (ResourceLock)
+            {
+                if (SolidBrushes.TryGetValue(argb, out var brush))
+                    return brush;
+
+                if (NativeInterop.GdipCreateSolidFill(argb, out brush) != NativeInterop.GdipOk)
+                    return 0;
+
+                SolidBrushes[argb] = brush;
+                return brush;
+            }
+        }
+
+        private static nint GetPen(uint argb, float width, Core.BorderStyle style)
+        {
+            var key = new PenKey(argb, width, style);
+
+            lock (ResourceLock)
+            {
+                if (Pens.TryGetValue(key, out var pen))
+                    return pen;
+
+                if (NativeInterop.GdipCreatePen1(argb, key.Width, NativeInterop.UnitPixel, out pen) != NativeInterop.GdipOk)
+                    return 0;
+
+                NativeInterop.GdipSetPenDashStyle(pen, style switch
+                {
+                    Core.BorderStyle.Dashed => NativeInterop.DashStyleDash,
+                    Core.BorderStyle.Dotted => NativeInterop.DashStyleDot,
+                    _ => NativeInterop.DashStyleSolid
+                });
+
+                Pens[key] = pen;
+                return pen;
+            }
+        }
+
+        private static void DeletePath(ref nint path)
+        {
+            if (path != 0)
+            {
+                NativeInterop.GdipDeletePath(path);
+                path = 0;
+            }
         }
 
         private static bool CreateRoundedRectanglePath(RectF rect, float radius, out nint path)
@@ -607,6 +894,17 @@ namespace EchoUI.Render.Win32
 
         private static void Shutdown()
         {
+            lock (ResourceLock)
+            {
+                foreach (var brush in SolidBrushes.Values)
+                    NativeInterop.GdipDeleteBrush(brush);
+                SolidBrushes.Clear();
+
+                foreach (var pen in Pens.Values)
+                    NativeInterop.GdipDeletePen(pen);
+                Pens.Clear();
+            }
+
             lock (StartupLock)
             {
                 if (s_token != 0)
@@ -621,6 +919,8 @@ namespace EchoUI.Render.Win32
         {
             return ((uint)color.A << 24) | ((uint)color.R << 16) | ((uint)color.G << 8) | color.B;
         }
+
+        private readonly record struct PenKey(uint Argb, float Width, Core.BorderStyle Style);
 
         private sealed class DrawScope : IDisposable
         {
@@ -650,51 +950,80 @@ namespace EchoUI.Render.Win32
 
     internal static class GdiText
     {
+        private const int MaxMeasureCacheEntries = 4096;
+        private static readonly object CacheLock = new();
+        private static readonly Dictionary<FontKey, nint> Fonts = [];
+        private static readonly Dictionary<TextMeasureKey, TextMeasurementResult> MeasureCache = [];
+
+        static GdiText()
+        {
+            AppDomain.CurrentDomain.ProcessExit += static (_, _) => ClearCaches();
+        }
+
         public static TextMeasurementResult MeasureText(string? text, string? fontFamily, float fontSize, string? fontWeight, float? widthConstraint = null, bool noWrap = true)
         {
             text ??= string.Empty;
             fontSize = fontSize > 0 ? fontSize : 14f;
+            var resolvedFamily = ResolveFontFamily(fontFamily, text);
+            var key = TextMeasureKey.Create(text, resolvedFamily, fontSize, fontWeight, widthConstraint, noWrap);
+
+            lock (CacheLock)
+            {
+                if (MeasureCache.TryGetValue(key, out var cached))
+                    return cached;
+            }
 
             var hdc = NativeInterop.GetDC(0);
             if (hdc == 0)
                 return new TextMeasurementResult(0, fontSize * 1.4f);
 
-            var font = CreateFontHandle(ResolveFontFamily(fontFamily, text), fontSize, fontWeight);
+            var font = GetFontHandle(resolvedFamily, fontSize, fontWeight);
             var oldFont = font != 0 ? NativeInterop.SelectObject(hdc, font) : 0;
 
             try
             {
                 var lineHeight = GetLineHeight(hdc, fontSize);
+                TextMeasurementResult result;
                 if (text.Length == 0)
-                    return new TextMeasurementResult(0, lineHeight);
-
-                if (noWrap || widthConstraint == null || widthConstraint <= 0)
                 {
-                    if (NativeInterop.GetTextExtentPoint32(hdc, text, text.Length, out var size))
-                        return new TextMeasurementResult(size.cx, Math.Max(lineHeight, size.cy));
+                    result = new TextMeasurementResult(0, lineHeight);
+                }
+                else if (noWrap || widthConstraint == null || widthConstraint <= 0)
+                {
+                    result = NativeInterop.GetTextExtentPoint32(hdc, text, text.Length, out var size)
+                        ? new TextMeasurementResult(size.cx, Math.Max(lineHeight, size.cy))
+                        : new TextMeasurementResult(text.Length * fontSize * 0.6f, lineHeight);
+                }
+                else
+                {
+                    var rect = new NativeInterop.RECT
+                    {
+                        Left = 0,
+                        Top = 0,
+                        Right = Math.Max(1, (int)Math.Ceiling(widthConstraint.Value)),
+                        Bottom = 0
+                    };
+                    NativeInterop.DrawText(hdc, text, text.Length, ref rect,
+                        NativeInterop.DT_LEFT | NativeInterop.DT_TOP | NativeInterop.DT_WORDBREAK |
+                        NativeInterop.DT_CALCRECT | NativeInterop.DT_NOPREFIX);
 
-                    return new TextMeasurementResult(text.Length * fontSize * 0.6f, lineHeight);
+                    result = new TextMeasurementResult(Math.Max(0, rect.Width), Math.Max(lineHeight, rect.Height));
                 }
 
-                var rect = new NativeInterop.RECT
+                lock (CacheLock)
                 {
-                    Left = 0,
-                    Top = 0,
-                    Right = Math.Max(1, (int)Math.Ceiling(widthConstraint.Value)),
-                    Bottom = 0
-                };
-                NativeInterop.DrawText(hdc, text, text.Length, ref rect,
-                    NativeInterop.DT_LEFT | NativeInterop.DT_TOP | NativeInterop.DT_WORDBREAK |
-                    NativeInterop.DT_CALCRECT | NativeInterop.DT_NOPREFIX);
+                    if (MeasureCache.Count >= MaxMeasureCacheEntries)
+                        MeasureCache.Clear();
 
-                return new TextMeasurementResult(Math.Max(0, rect.Width), Math.Max(lineHeight, rect.Height));
+                    MeasureCache[key] = result;
+                }
+
+                return result;
             }
             finally
             {
                 if (oldFont != 0)
                     NativeInterop.SelectObject(hdc, oldFont);
-                if (font != 0)
-                    NativeInterop.DeleteObject(font);
                 NativeInterop.ReleaseDC(0, hdc);
             }
         }
@@ -704,7 +1033,7 @@ namespace EchoUI.Render.Win32
             if (bounds.Width <= 0 || bounds.Height <= 0 || string.IsNullOrEmpty(text)) return;
 
             fontSize = fontSize > 0 ? fontSize : 14f;
-            var font = CreateFontHandle(ResolveFontFamily(fontFamily, text), fontSize, fontWeight);
+            var font = GetFontHandle(ResolveFontFamily(fontFamily, text), fontSize, fontWeight);
             var oldFont = font != 0 ? NativeInterop.SelectObject(hdc, font) : 0;
             var rect = new NativeInterop.RECT
             {
@@ -726,30 +1055,41 @@ namespace EchoUI.Render.Win32
             {
                 if (oldFont != 0)
                     NativeInterop.SelectObject(hdc, oldFont);
-                if (font != 0)
-                    NativeInterop.DeleteObject(font);
             }
         }
 
-        public static nint CreateFontHandle(string? fontFamily, float fontSize, string? fontWeight)
+        public static nint GetFontHandle(string? fontFamily, float fontSize, string? fontWeight)
         {
             var family = string.IsNullOrWhiteSpace(fontFamily) ? "Segoe UI" : fontFamily;
-            var height = -Math.Max(1, (int)Math.Round(fontSize > 0 ? fontSize : 14f));
-            return NativeInterop.CreateFont(
-                height,
-                0,
-                0,
-                0,
-                IsBold(fontWeight) ? NativeInterop.FW_BOLD : NativeInterop.FW_NORMAL,
-                0,
-                0,
-                0,
-                NativeInterop.DEFAULT_CHARSET,
-                NativeInterop.OUT_DEFAULT_PRECIS,
-                NativeInterop.CLIP_DEFAULT_PRECIS,
-                NativeInterop.CLEARTYPE_QUALITY,
-                NativeInterop.DEFAULT_PITCH | NativeInterop.FF_DONTCARE,
-                family);
+            var key = FontKey.Create(family, fontSize, fontWeight);
+
+            lock (CacheLock)
+            {
+                if (Fonts.TryGetValue(key, out var font))
+                    return font;
+
+                var height = -Math.Max(1, (int)Math.Round(fontSize > 0 ? fontSize : 14f));
+                font = NativeInterop.CreateFont(
+                    height,
+                    0,
+                    0,
+                    0,
+                    key.Weight,
+                    0,
+                    0,
+                    0,
+                    NativeInterop.DEFAULT_CHARSET,
+                    NativeInterop.OUT_DEFAULT_PRECIS,
+                    NativeInterop.CLIP_DEFAULT_PRECIS,
+                    NativeInterop.CLEARTYPE_QUALITY,
+                    NativeInterop.DEFAULT_PITCH | NativeInterop.FF_DONTCARE,
+                    key.Family);
+
+                if (font != 0)
+                    Fonts[key] = font;
+
+                return font;
+            }
         }
 
         public static string ResolveFontFamily(string? fontFamily, string? text)
@@ -764,6 +1104,39 @@ namespace EchoUI.Render.Win32
         {
             var result = MeasureText(string.Empty, fontFamily, fontSize, fontWeight);
             return result.Height;
+        }
+
+        private static void ClearCaches()
+        {
+            lock (CacheLock)
+            {
+                foreach (var font in Fonts.Values)
+                    NativeInterop.DeleteObject(font);
+
+                Fonts.Clear();
+                MeasureCache.Clear();
+            }
+        }
+
+        private readonly record struct FontKey(string Family, int Size, int Weight)
+        {
+            public static FontKey Create(string family, float fontSize, string? fontWeight)
+            {
+                var size = Math.Max(1, (int)Math.Round((fontSize > 0 ? fontSize : 14f) * 4f));
+                return new FontKey(family, size, IsBold(fontWeight) ? NativeInterop.FW_BOLD : NativeInterop.FW_NORMAL);
+            }
+        }
+
+        private readonly record struct TextMeasureKey(string Text, string Family, int Size, string Weight, int WidthConstraint, bool NoWrap)
+        {
+            public static TextMeasureKey Create(string text, string family, float fontSize, string? fontWeight, float? widthConstraint, bool noWrap)
+            {
+                var size = Math.Max(1, (int)Math.Round((fontSize > 0 ? fontSize : 14f) * 4f));
+                var width = widthConstraint.HasValue && widthConstraint.Value > 0
+                    ? Math.Max(1, (int)Math.Ceiling(widthConstraint.Value))
+                    : 0;
+                return new TextMeasureKey(text, family, size, fontWeight ?? string.Empty, width, noWrap);
+            }
         }
 
         private static float GetLineHeight(nint hdc, float fallbackFontSize)
@@ -846,8 +1219,6 @@ namespace EchoUI.Render.Win32
                 height = (int)h;
                 var stride = checked(width * 4);
                 var bufferSize = checked(stride * height);
-                var pixels = new byte[bufferSize];
-                converter.CopyPixels(0, (uint)stride, (uint)bufferSize, pixels);
 
                 var bitmapInfo = new NativeInterop.BITMAPINFO
                 {
@@ -873,7 +1244,7 @@ namespace EchoUI.Render.Win32
                         return false;
                     }
 
-                    Marshal.Copy(pixels, 0, bits, bufferSize);
+                    converter.CopyPixels(0, (uint)stride, (uint)bufferSize, bits);
                     return true;
                 }
                 finally
@@ -969,7 +1340,7 @@ namespace EchoUI.Render.Win32
             void GetPixelFormat(out Guid pPixelFormat);
             void GetResolution(out double pDpiX, out double pDpiY);
             void CopyPalette(nint pIPalette);
-            void CopyPixels(nint prc, uint cbStride, uint cbBufferSize, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] pbBuffer);
+            void CopyPixels(nint prc, uint cbStride, uint cbBufferSize, nint pbBuffer);
         }
 
         [ComImport]

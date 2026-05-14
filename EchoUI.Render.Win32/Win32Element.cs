@@ -128,6 +128,13 @@ namespace EchoUI.Render.Win32
         public int NativeImageWidth { get; set; }
         public int NativeImageHeight { get; set; }
 
+        public nint RoundedFillPath { get; set; }
+        public RectF RoundedFillPathBounds { get; set; }
+        public float RoundedFillPathRadius { get; set; } = -1;
+        public nint RoundedBorderPath { get; set; }
+        public RectF RoundedBorderPathBounds { get; set; }
+        public float RoundedBorderPathRadius { get; set; } = -1;
+
         public Win32Element(string elementType)
         {
             ElementType = elementType;

@@ -138,20 +138,22 @@ namespace EchoUI.Render.Win32
             // 处理 Enter/Leave
             if (hit != _hoveredElement)
             {
+                var oldHovered = _hoveredElement;
+
                 // 向上遍历旧元素链，触发 Leave
-                if (_hoveredElement != null)
+                if (oldHovered != null)
                 {
-                    FireMouseLeaveChain(_hoveredElement, hit);
+                    FireMouseLeaveChain(oldHovered, hit);
                 }
 
                 // 向上遍历新元素链，触发 Enter
                 if (hit != null)
                 {
-                    FireMouseEnterChain(hit, _hoveredElement);
+                    FireMouseEnterChain(hit, oldHovered);
                 }
 
                 _hoveredElement = hit;
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(oldHovered, hit);
             }
 
             // 向上冒泡查找有 OnMouseMove 的元素
@@ -184,7 +186,7 @@ namespace EchoUI.Render.Win32
                     downTarget.OnMouseDown?.Invoke();
                     downTarget.OnPointerDown?.Invoke(new MouseEvent(localPoint, button));
                 }
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(hit);
             }
         }
 
@@ -211,7 +213,7 @@ namespace EchoUI.Render.Win32
                     releaseClickTarget.OnClick?.Invoke(button);
                 }
 
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(hit, _pressedClickTarget);
             }
 
             _pressedButton = null;
@@ -296,9 +298,10 @@ namespace EchoUI.Render.Win32
         {
             if (_hoveredElement != null)
             {
-                FireMouseLeaveChain(_hoveredElement, null);
+                var oldHovered = _hoveredElement;
+                FireMouseLeaveChain(oldHovered, null);
                 _hoveredElement = null;
-                _renderer.RequestRepaint();
+                _renderer.RequestRepaint(oldHovered);
             }
         }
 
@@ -379,10 +382,11 @@ namespace EchoUI.Render.Win32
                 return;
             }
 
-            if (_focusedElement != null)
+            var oldFocused = _focusedElement;
+            if (oldFocused != null)
             {
-                _focusedElement.IsFocused = false;
-                _focusedElement.OnBlur?.Invoke();
+                oldFocused.IsFocused = false;
+                oldFocused.OnBlur?.Invoke();
             }
 
             _focusedElement = element;
@@ -403,7 +407,7 @@ namespace EchoUI.Render.Win32
                 _focusedElement.OnFocus?.Invoke();
             }
 
-            _renderer.RequestRepaint();
+            _renderer.RequestRepaint(oldFocused, _focusedElement);
         }
 
         private static Core.Point ToLocalPoint(Win32Element element, float x, float y)

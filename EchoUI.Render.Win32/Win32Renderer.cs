@@ -29,6 +29,9 @@ namespace EchoUI.Render.Win32
         /// </summary>
         private bool _suppressEditNotification;
         private bool _disposed;
+        private bool _layoutValid;
+        private float _layoutViewportWidth;
+        private float _layoutViewportHeight;
         private readonly HashSet<string> _nativeDiagnostics = [];
 
         internal Win32Element? RootElement => _rootElement;
@@ -69,6 +72,7 @@ namespace EchoUI.Render.Win32
             UpdateEventHandlers(element, newProps);
 
             if (patch.UpdatedProperties == null) return;
+            _layoutValid = false;
 
             foreach (var (propName, propValue) in patch.UpdatedProperties)
             {
@@ -122,7 +126,7 @@ namespace EchoUI.Render.Win32
             else
                 parentElement.Children.Add(childElement);
 
-
+            _layoutValid = false;
         }
 
         public void RemoveChild(object parent, object child)
@@ -140,6 +144,7 @@ namespace EchoUI.Render.Win32
             var childElement = (Win32Element)child;
             parentElement.Children.Remove(childElement);
             childElement.Parent = null;
+            _layoutValid = false;
 
             ReleaseElementTree(childElement);
         }
@@ -164,7 +169,7 @@ namespace EchoUI.Render.Win32
             else
                 parentElement.Children.Add(childElement);
 
-
+            _layoutValid = false;
         }
 
         public TextMeasurementResult MeasureText(TextMeasurementRequest request)
@@ -647,33 +652,18 @@ namespace EchoUI.Render.Win32
                 }
             }
             
-            // --- 同步字体 ---
-            // 简单起见，每次只要属性可能变了就重建字体 (GDI 资源要注意释放)
-            // 这里为了简化逻辑，我们先释放旧的
-            if (element.NativeFontHandle != 0)
+            var fontHandle = GdiText.GetFontHandle(element.FontFamily, element.FontSize > 0 ? element.FontSize : 14, element.FontWeight);
+            if (fontHandle != 0 && element.NativeFontHandle != fontHandle)
             {
-                NativeInterop.DeleteObject(element.NativeFontHandle);
-                element.NativeFontHandle = 0;
-            }
-            
-            element.NativeFontHandle = GdiText.CreateFontHandle(element.FontFamily, element.FontSize > 0 ? element.FontSize : 14, element.FontWeight);
-            if (element.NativeFontHandle != 0)
-            {
-                NativeInterop.SendMessage(element.EditHwnd, NativeInterop.WM_SETFONT, element.NativeFontHandle, 1);
+                element.NativeFontHandle = fontHandle;
+                NativeInterop.SendMessage(element.EditHwnd, NativeInterop.WM_SETFONT, fontHandle, 1);
             }
 
-            // --- 同步背景刷 (用于 WM_CTLCOLOREDIT) ---
-            if (element.NativeBrushHandle != 0)
-            {
-                NativeInterop.DeleteObject(element.NativeBrushHandle);
-                element.NativeBrushHandle = 0;
-            }
-            // 如果透明背景或者默认，通常用白色，这里我们用 BackgroundColor
-            var bgColor = element.BackgroundColor ?? Core.Color.Transparent; // 如果没有背景色，Input 默认可能透或者是白？通常 Input 是白的
+            var bgColor = element.BackgroundColor ?? Core.Color.Transparent;
             if (!element.BackgroundColor.HasValue) bgColor = new Core.Color(255, 255, 255, 255);
             
             int colorRef = (bgColor.B << 16) | (bgColor.G << 8) | bgColor.R;
-            element.NativeBrushHandle = NativeInterop.CreateSolidBrush(colorRef);
+            element.NativeBrushHandle = GdiResourceCache.GetSolidBrush(colorRef);
 
             // 触发重绘以应用颜色
             NativeInterop.InvalidateRect(element.EditHwnd, 0, true);
@@ -731,7 +721,7 @@ namespace EchoUI.Render.Win32
             if (_editElements.TryGetValue(editHwnd, out var element))
             {
                 element.IsFocused = isFocused;
-                RequestRepaint();
+                RequestRepaint(element);
             }
         }
 
@@ -754,16 +744,8 @@ namespace EchoUI.Render.Win32
             {
                 _editElements.Remove(element.EditHwnd);
 
-                if (element.NativeFontHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeFontHandle);
-                    element.NativeFontHandle = 0;
-                }
-                if (element.NativeBrushHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeBrushHandle);
-                    element.NativeBrushHandle = 0;
-                }
+                element.NativeFontHandle = 0;
+                element.NativeBrushHandle = 0;
 
                 if (NativeInterop.IsWindow(element.EditHwnd))
                     NativeInterop.DestroyWindow(element.EditHwnd);
@@ -771,17 +753,11 @@ namespace EchoUI.Render.Win32
             }
             else
             {
-                if (element.NativeFontHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeFontHandle);
-                    element.NativeFontHandle = 0;
-                }
-                if (element.NativeBrushHandle != 0)
-                {
-                    NativeInterop.DeleteObject(element.NativeBrushHandle);
-                    element.NativeBrushHandle = 0;
-                }
+                element.NativeFontHandle = 0;
+                element.NativeBrushHandle = 0;
             }
+
+            GdiPainter.ReleaseCachedResources(element);
 
             if (element.NativeImageHandle != 0)
             {
@@ -818,18 +794,26 @@ namespace EchoUI.Render.Win32
         {
             if (_rootElement == null || _window.Hwnd == 0) return;
 
+            _layoutValid = false;
             NativeInterop.GetClientRect(_window.Hwnd, out var rect);
-            float vpW = rect.Width;
-            float vpH = rect.Height;
-
-            if (vpW > 0 && vpH > 0)
-            {
-                FlexLayout.ComputeLayout(_rootElement, vpW, vpH);
-                UpdateEditPositions(_rootElement, vpW, vpH);
-                CollectFloatingElements();
-            }
-
+            EnsureLayout(rect.Width, rect.Height);
             NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+        }
+
+        internal void EnsureLayout(float vpW, float vpH)
+        {
+            if (_rootElement == null || vpW <= 0 || vpH <= 0)
+                return;
+
+            if (_layoutValid && _layoutViewportWidth.Equals(vpW) && _layoutViewportHeight.Equals(vpH))
+                return;
+
+            FlexLayout.ComputeLayout(_rootElement, vpW, vpH);
+            UpdateEditPositions(_rootElement, vpW, vpH);
+            CollectFloatingElements();
+            _layoutViewportWidth = vpW;
+            _layoutViewportHeight = vpH;
+            _layoutValid = true;
         }
 
         private void CollectFloatingElements()
@@ -876,6 +860,51 @@ namespace EchoUI.Render.Win32
         {
             if (_window.Hwnd != 0)
                 NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+        }
+
+        internal void RequestRepaint(Win32Element? element)
+        {
+            if (_window.Hwnd == 0)
+                return;
+
+            if (element == null || element.LayoutWidth <= 0 || element.LayoutHeight <= 0)
+            {
+                NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+                return;
+            }
+
+            InvalidateElementBounds(element);
+        }
+
+        internal void RequestRepaint(Win32Element? first, Win32Element? second)
+        {
+            if (_window.Hwnd == 0)
+                return;
+
+            if (first == null && second == null)
+            {
+                NativeInterop.InvalidateRect(_window.Hwnd, 0, false);
+                return;
+            }
+
+            if (first != null)
+                InvalidateElementBounds(first);
+            if (second != null && !ReferenceEquals(first, second))
+                InvalidateElementBounds(second);
+        }
+
+        private void InvalidateElementBounds(Win32Element element)
+        {
+            const int padding = 3;
+            var rect = new NativeInterop.RECT
+            {
+                Left = (int)Math.Floor(element.AbsoluteX) - padding,
+                Top = (int)Math.Floor(element.AbsoluteY) - padding,
+                Right = (int)Math.Ceiling(element.AbsoluteX + element.LayoutWidth) + padding,
+                Bottom = (int)Math.Ceiling(element.AbsoluteY + element.LayoutHeight) + padding
+            };
+
+            NativeInterop.InvalidateRect(_window.Hwnd, ref rect, false);
         }
 
         /// <summary>

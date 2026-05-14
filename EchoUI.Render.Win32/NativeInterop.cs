@@ -309,6 +309,9 @@ namespace EchoUI.Render.Win32
         public static extern bool InvalidateRect(nint hWnd, nint lpRect, bool bErase);
 
         [DllImport("user32.dll")]
+        public static extern bool InvalidateRect(nint hWnd, ref RECT lpRect, bool bErase);
+
+        [DllImport("user32.dll")]
         public static extern nint BeginPaint(nint hWnd, out PAINTSTRUCT lpPaint);
 
         [DllImport("user32.dll")]

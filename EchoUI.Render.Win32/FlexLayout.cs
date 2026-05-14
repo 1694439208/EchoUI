@@ -165,52 +165,56 @@ namespace EchoUI.Render.Win32
             }
 
             // --- 第二遍：分配 FlexGrow / FlexShrink ---
-            var normalItems = items.Where(i => !i.IsFloat).ToList();
-            int normalCount = normalItems.Count;
-            float totalGaps = normalCount > 1 ? gap * (normalCount - 1) : 0;
-
-            float usedMain = totalGaps;
-            foreach (var item in normalItems)
+            int normalCount = 0;
+            foreach (var item in items)
             {
+                if (!item.IsFloat)
+                    normalCount++;
+            }
+
+            float totalGaps = normalCount > 1 ? gap * (normalCount - 1) : 0;
+            float usedMain = totalGaps;
+            float totalGrow = 0;
+            float totalShrink = 0;
+            foreach (var item in items)
+            {
+                if (item.IsFloat) continue;
+
                 float marginMain = isRow
                     ? item.Margin.Left + item.Margin.Right
                     : item.Margin.Top + item.Margin.Bottom;
                 usedMain += item.MainBase + marginMain;
+                totalGrow += item.Grow;
+                totalShrink += item.Shrink * item.MainBase;
             }
 
             float freeSpace = mainSize - usedMain;
 
-            if (freeSpace > 0)
+            if (freeSpace > 0 && totalGrow > 0)
             {
-                float totalGrow = normalItems.Sum(i => i.Grow);
-                if (totalGrow > 0)
+                foreach (var item in items)
                 {
-                    foreach (var item in normalItems)
-                    {
-                        if (item.Grow > 0)
-                            item.MainBase += freeSpace * (item.Grow / totalGrow);
-                    }
+                    if (!item.IsFloat && item.Grow > 0)
+                        item.MainBase += freeSpace * (item.Grow / totalGrow);
                 }
             }
-            else if (freeSpace < 0)
+            else if (freeSpace < 0 && totalShrink > 0)
             {
-                float totalShrink = normalItems.Sum(i => i.Shrink * i.MainBase);
-                if (totalShrink > 0)
+                foreach (var item in items)
                 {
-                    foreach (var item in normalItems)
+                    if (!item.IsFloat && item.Shrink > 0)
                     {
-                        if (item.Shrink > 0)
-                        {
-                            float shrinkAmount = (-freeSpace) * (item.Shrink * item.MainBase / totalShrink);
-                            item.MainBase = Math.Max(0, item.MainBase - shrinkAmount);
-                        }
+                        float shrinkAmount = (-freeSpace) * (item.Shrink * item.MainBase / totalShrink);
+                        item.MainBase = Math.Max(0, item.MainBase - shrinkAmount);
                     }
                 }
             }
 
             // --- 应用 Min/Max 约束 ---
-            foreach (var item in normalItems)
+            foreach (var item in items)
             {
+                if (item.IsFloat) continue;
+
                 var child = item.Element;
                 float? minMain, maxMain, minCross, maxCross;
                 if (isRow)
@@ -234,13 +238,16 @@ namespace EchoUI.Render.Win32
             }
 
             // --- 第三遍：JustifyContent 定位 ---
-            float actualUsedMain = totalGaps + normalItems.Sum(i =>
+            float actualUsedMain = totalGaps;
+            foreach (var item in items)
             {
+                if (item.IsFloat) continue;
+
                 float marginMain = isRow
-                    ? i.Margin.Left + i.Margin.Right
-                    : i.Margin.Top + i.Margin.Bottom;
-                return i.MainBase + marginMain;
-            });
+                    ? item.Margin.Left + item.Margin.Right
+                    : item.Margin.Top + item.Margin.Bottom;
+                actualUsedMain += item.MainBase + marginMain;
+            }
 
             float remainingSpace = Math.Max(0, mainSize - actualUsedMain);
             float mainOffset = 0;

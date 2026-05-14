@@ -17,6 +17,8 @@ namespace EchoUI.Render.Win32
         private nint _backBufferDc;
         private nint _backBufferBitmap;
         private nint _backBufferOldBitmap;
+        private nint _backBufferBits;
+        private int _backBufferStride;
         private int _backBufferWidth;
         private int _backBufferHeight;
 
@@ -333,15 +335,31 @@ namespace EchoUI.Render.Win32
 
                 if (w > 0 && h > 0 && _renderer?.RootElement != null)
                 {
-                    // 确保布局已计算
-                    FlexLayout.ComputeLayout(_renderer.RootElement, w, h);
-                    _renderer.UpdateAllEditPositions(w, h);
+                    _renderer.EnsureLayout(w, h);
 
-                    var memoryDc = EnsureBackBuffer(ps.hdc, w, h);
+                    var memoryDc = EnsureBackBuffer(ps.hdc, w, h, out var recreated);
                     if (memoryDc != 0)
                     {
-                        GdiPainter.Paint(memoryDc, _renderer.RootElement, _renderer.FloatingElements, w, h);
-                        NativeInterop.BitBlt(ps.hdc, 0, 0, w, h, memoryDc, 0, 0, NativeInterop.SRCCOPY);
+                        var dirtyRect = recreated
+                            ? new RectF(0, 0, w, h)
+                            : new RectF(ps.rcPaint.Left, ps.rcPaint.Top, Math.Max(0, ps.rcPaint.Width), Math.Max(0, ps.rcPaint.Height));
+
+                        CpuBitmapSurface? bitmapSurface = _backBufferBits != 0
+                            ? new CpuBitmapSurface(_backBufferBits, w, h, _backBufferStride)
+                            : null;
+                        GdiPainter.Paint(memoryDc, _renderer.RootElement, _renderer.FloatingElements, w, h, dirtyRect, bitmapSurface);
+
+                        var nativeDirty = ToNativeRect(dirtyRect);
+                        NativeInterop.BitBlt(
+                            ps.hdc,
+                            nativeDirty.Left,
+                            nativeDirty.Top,
+                            Math.Max(0, nativeDirty.Width),
+                            Math.Max(0, nativeDirty.Height),
+                            memoryDc,
+                            nativeDirty.Left,
+                            nativeDirty.Top,
+                            NativeInterop.SRCCOPY);
                     }
                 }
             }
@@ -351,20 +369,51 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private nint EnsureBackBuffer(nint referenceDc, int width, int height)
+        private static NativeInterop.RECT ToNativeRect(RectF rect)
         {
+            return new NativeInterop.RECT
+            {
+                Left = (int)Math.Floor(rect.Left),
+                Top = (int)Math.Floor(rect.Top),
+                Right = (int)Math.Ceiling(rect.Right),
+                Bottom = (int)Math.Ceiling(rect.Bottom)
+            };
+        }
+
+        private nint EnsureBackBuffer(nint referenceDc, int width, int height, out bool recreated)
+        {
+            recreated = false;
+
             if (_backBufferDc != 0 && _backBufferWidth == width && _backBufferHeight == height)
                 return _backBufferDc;
 
             DisposeBackBuffer();
+            recreated = true;
 
             var memoryDc = NativeInterop.CreateCompatibleDC(referenceDc);
             if (memoryDc == 0)
                 return 0;
 
-            var bitmap = NativeInterop.CreateCompatibleBitmap(referenceDc, width, height);
-            if (bitmap == 0)
+            var stride = checked(width * sizeof(uint));
+            var bitmapInfo = new NativeInterop.BITMAPINFO
             {
+                bmiHeader = new NativeInterop.BITMAPINFOHEADER
+                {
+                    biSize = (uint)Marshal.SizeOf<NativeInterop.BITMAPINFOHEADER>(),
+                    biWidth = width,
+                    biHeight = -height,
+                    biPlanes = 1,
+                    biBitCount = 32,
+                    biCompression = NativeInterop.BI_RGB,
+                    biSizeImage = (uint)checked(stride * height)
+                }
+            };
+
+            var bitmap = NativeInterop.CreateDIBSection(referenceDc, ref bitmapInfo, NativeInterop.DIB_RGB_COLORS, out var bits, 0, 0);
+            if (bitmap == 0 || bits == 0)
+            {
+                if (bitmap != 0)
+                    NativeInterop.DeleteObject(bitmap);
                 NativeInterop.DeleteDC(memoryDc);
                 return 0;
             }
@@ -372,6 +421,8 @@ namespace EchoUI.Render.Win32
             _backBufferOldBitmap = NativeInterop.SelectObject(memoryDc, bitmap);
             _backBufferDc = memoryDc;
             _backBufferBitmap = bitmap;
+            _backBufferBits = bits;
+            _backBufferStride = stride;
             _backBufferWidth = width;
             _backBufferHeight = height;
             return _backBufferDc;
@@ -393,6 +444,8 @@ namespace EchoUI.Render.Win32
             _backBufferDc = 0;
             _backBufferBitmap = 0;
             _backBufferOldBitmap = 0;
+            _backBufferBits = 0;
+            _backBufferStride = 0;
             _backBufferWidth = 0;
             _backBufferHeight = 0;
         }
