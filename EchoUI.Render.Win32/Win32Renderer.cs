@@ -1,7 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using System.Diagnostics;
 using EchoUI.Core;
 
@@ -33,27 +30,10 @@ namespace EchoUI.Render.Win32
         private bool _suppressEditNotification;
         private bool _disposed;
         private readonly HashSet<string> _nativeDiagnostics = [];
-        private static readonly Bitmap _measureBitmap = new(1, 1);
-        private static readonly Graphics _measureGraphics;
-        private static readonly StringFormat _measureStringFormat;
 
         internal Win32Element? RootElement => _rootElement;
         internal Win32UpdateScheduler? Scheduler => _scheduler;
         internal HitTestManager HitTestManager => _hitTestManager!;
-
-        static Win32Renderer()
-        {
-            _measureGraphics = Graphics.FromImage(_measureBitmap);
-            _measureGraphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            _measureGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-            _measureStringFormat = new StringFormat
-            {
-                Alignment = StringAlignment.Near,
-                LineAlignment = StringAlignment.Near,
-                Trimming = StringTrimming.None,
-                FormatFlags = StringFormatFlags.MeasureTrailingSpaces
-            };
-        }
 
         public Win32Renderer(Win32Window window)
         {
@@ -189,17 +169,7 @@ namespace EchoUI.Render.Win32
 
         public TextMeasurementResult MeasureText(TextMeasurementRequest request)
         {
-            var text = request.Text ?? string.Empty;
-            var fontSize = request.FontSize ?? 14f;
-            var fontStyle = ResolveFontStyle(request.FontWeight);
-            var fontFamily = ResolveFontFamily(request.FontFamily, text);
-
-            lock (_measureGraphics)
-            {
-                using var font = new Font(fontFamily, fontSize, fontStyle, GraphicsUnit.Pixel);
-                var size = _measureGraphics.MeasureString(text, font, new PointF(0, 0), _measureStringFormat);
-                return new TextMeasurementResult(size.Width, size.Height);
-            }
+            return GdiText.MeasureText(request.Text, request.FontFamily, request.FontSize ?? 14f, request.FontWeight);
         }
 
         public Task<string> ReadClipboardTextAsync()
@@ -399,10 +369,12 @@ namespace EchoUI.Render.Win32
                     {
                         LoadImage(element, src);
                     }
-                    else if (propValue == null && element.NativeImage != null)
+                    else if (propValue == null && element.NativeImageHandle != 0)
                     {
-                        element.NativeImage.Dispose();
-                        element.NativeImage = null;
+                        NativeInterop.DeleteObject(element.NativeImageHandle);
+                        element.NativeImageHandle = 0;
+                        element.NativeImageWidth = 0;
+                        element.NativeImageHeight = 0;
                     }
                     return;
                 }
@@ -621,31 +593,6 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private static string ResolveFontFamily(string? fontFamily, string? text)
-        {
-            if (!string.IsNullOrWhiteSpace(fontFamily))
-                return fontFamily;
-
-            return IsLikelyEmojiOrSymbol(text) ? "Segoe UI Emoji" : "Segoe UI";
-        }
-
-        private static bool IsLikelyEmojiOrSymbol(string? text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return false;
-
-            foreach (var c in text)
-            {
-                if (char.IsSurrogate(c))
-                    return true;
-
-                if (c >= 0x2000 && c <= 0x33FF)
-                    return true;
-            }
-
-            return false;
-        }
-
         [Conditional("DEBUG")]
         private void ReportNativeDiagnostic(string message)
         {
@@ -709,11 +656,9 @@ namespace EchoUI.Render.Win32
                 element.NativeFontHandle = 0;
             }
             
-            var fontStyle = ResolveFontStyle(element.FontWeight);
-
-            using (var font = new Font(element.FontFamily ?? "Segoe UI", element.FontSize > 0 ? element.FontSize : 14, fontStyle, GraphicsUnit.Pixel))
+            element.NativeFontHandle = GdiText.CreateFontHandle(element.FontFamily, element.FontSize > 0 ? element.FontSize : 14, element.FontWeight);
+            if (element.NativeFontHandle != 0)
             {
-                element.NativeFontHandle = font.ToHfont();
                 NativeInterop.SendMessage(element.EditHwnd, NativeInterop.WM_SETFONT, element.NativeFontHandle, 1);
             }
 
@@ -838,10 +783,12 @@ namespace EchoUI.Render.Win32
                 }
             }
 
-            if (element.NativeImage != null)
+            if (element.NativeImageHandle != 0)
             {
-                element.NativeImage.Dispose();
-                element.NativeImage = null;
+                NativeInterop.DeleteObject(element.NativeImageHandle);
+                element.NativeImageHandle = 0;
+                element.NativeImageWidth = 0;
+                element.NativeImageHeight = 0;
             }
         }
 
@@ -962,9 +909,9 @@ namespace EchoUI.Render.Win32
                 int w = (int)Math.Ceiling(contentW);
                 int h = Math.Max(1, (int)Math.Round(editH, MidpointRounding.AwayFromZero));
 
-                var editRect = new RectangleF(x, y, w, h);
+                var editRect = new RectF(x, y, w, h);
                 var clipRect = GetEditClipRect(element, vpW, vpH);
-                var visibleRect = RectangleF.Intersect(editRect, clipRect);
+                var visibleRect = RectF.Intersect(editRect, clipRect);
 
                 if (visibleRect.Width <= 0 || visibleRect.Height <= 0 || w <= 0 || h <= 0)
                 {
@@ -990,16 +937,16 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private RectangleF GetEditClipRect(Win32Element element, float vpW, float vpH)
+        private RectF GetEditClipRect(Win32Element element, float vpW, float vpH)
         {
-            var clipRect = new RectangleF(0, 0, vpW, vpH);
+            var clipRect = new RectF(0, 0, vpW, vpH);
             var current = element.Parent;
 
             while (current != null)
             {
                 if (current.Overflow != Overflow.Visible)
                 {
-                    clipRect = RectangleF.Intersect(clipRect, current.GetAbsoluteBounds());
+                    clipRect = RectF.Intersect(clipRect, current.GetAbsoluteBounds());
                 }
 
                 if (current.Float)
@@ -1011,7 +958,7 @@ namespace EchoUI.Render.Win32
             return clipRect;
         }
 
-        private static void ApplyEditClipRegion(nint hwnd, RectangleF editRect, RectangleF visibleRect)
+        private static void ApplyEditClipRegion(nint hwnd, RectF editRect, RectF visibleRect)
         {
             if (visibleRect.Left <= editRect.Left && visibleRect.Top <= editRect.Top &&
                 visibleRect.Right >= editRect.Right && visibleRect.Bottom >= editRect.Bottom)
@@ -1037,25 +984,7 @@ namespace EchoUI.Render.Win32
         private static float GetEditPreferredHeight(Win32Element element)
         {
             var fontSize = element.FontSize > 0 ? element.FontSize : 14f;
-            try
-            {
-                using var font = new Font(element.FontFamily ?? "Segoe UI", fontSize, ResolveFontStyle(element.FontWeight), GraphicsUnit.Pixel);
-                return (float)Math.Ceiling(font.GetHeight()) + 1f;
-            }
-            catch
-            {
-                return fontSize + 3f;
-            }
-        }
-
-        private static FontStyle ResolveFontStyle(string? fontWeight)
-        {
-            if (string.IsNullOrEmpty(fontWeight)) return FontStyle.Regular;
-
-            var weight = fontWeight.ToLowerInvariant();
-            return weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900"
-                ? FontStyle.Bold
-                : FontStyle.Regular;
+            return GdiText.GetPreferredLineHeight(element.FontFamily, fontSize, element.FontWeight) + 1f;
         }
 
         private static float GetBorderInset(Win32Element element)
@@ -1111,10 +1040,14 @@ namespace EchoUI.Render.Win32
                     if (File.Exists(p1)) path = p1;
                 }
 
-                if (path != null)
+                if (path != null && WicImageLoader.TryLoadBitmap(path, out var bitmap, out var width, out var height))
                 {
-                    if (element.NativeImage != null) element.NativeImage.Dispose();
-                    element.NativeImage = Image.FromFile(path);
+                    if (element.NativeImageHandle != 0)
+                        NativeInterop.DeleteObject(element.NativeImageHandle);
+
+                    element.NativeImageHandle = bitmap;
+                    element.NativeImageWidth = width;
+                    element.NativeImageHeight = height;
                 }
             }
             catch { /* 忽略加载错误 */ }

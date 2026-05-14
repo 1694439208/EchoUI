@@ -1,6 +1,3 @@
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
@@ -13,27 +10,6 @@ namespace EchoUI.Render.Win32
     /// </summary>
     internal static class FlexLayout
     {
-        // 缓存用于测量的 Graphics 对象，避免重复创建带来的性能开销
-        private static readonly Bitmap _measureBitmap = new(1, 1);
-        private static readonly Graphics _measureGraphics;
-        private static readonly StringFormat _defaultStringFormat;
-
-        static FlexLayout()
-        {
-            _measureGraphics = Graphics.FromImage(_measureBitmap);
-            _measureGraphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            _measureGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-            // 保持与 GdiPainter 一致的 StringFormat 配置
-            _defaultStringFormat = new StringFormat
-            {
-                Alignment = StringAlignment.Near,
-                LineAlignment = StringAlignment.Near,
-                Trimming = StringTrimming.None, // 布局阶段不裁剪，由渲染阶段处理
-                FormatFlags = StringFormatFlags.MeasureTrailingSpaces // 测量包含尾部空格
-            };
-        }
-
         /// <summary>
         /// 从根元素开始计算整棵树的布局
         /// </summary>
@@ -567,74 +543,21 @@ namespace EchoUI.Render.Win32
         private static float MeasureTextWidth(Win32Element element)
         {
             if (string.IsNullOrEmpty(element.Text)) return 0;
-            float fontSize = element.FontSize > 0 ? element.FontSize : 14;
 
-            lock (_measureGraphics)
-            {
-                var fontStyle = FontStyle.Regular;
-                if (element.FontWeight != null)
-                {
-                     var weight = element.FontWeight.ToLower();
-                     if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
-                         fontStyle = FontStyle.Bold;
-                }
-
-                using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
-                var size = _measureGraphics.MeasureString(element.Text, font, new PointF(0, 0), _defaultStringFormat);
-                
-                return size.Width;
-            }
+            var fontSize = element.FontSize > 0 ? element.FontSize : 14;
+            var size = GdiText.MeasureText(element.Text, element.FontFamily, fontSize, element.FontWeight, noWrap: true);
+            return size.Width;
         }
 
         private static float MeasureTextHeight(Win32Element element, float widthConstraint)
         {
-            float fontSize = element.FontSize > 0 ? element.FontSize : 14;
-            // 如果空文本，至少保留一行高度
-            if (string.IsNullOrEmpty(element.Text)) return fontSize * 1.4f;
+            var fontSize = element.FontSize > 0 ? element.FontSize : 14;
+            if (string.IsNullOrEmpty(element.Text))
+                return GdiText.GetPreferredLineHeight(element.FontFamily, fontSize, element.FontWeight);
 
-            lock (_measureGraphics)
-            {
-                var fontStyle = FontStyle.Regular;
-                if (element.FontWeight != null)
-                {
-                     var weight = element.FontWeight.ToLower();
-                     if (weight is "bold" or "semibold" or "500" or "600" or "700" or "800" or "900")
-                         fontStyle = FontStyle.Bold;
-                }
-
-                using var font = new Font(ResolveFontFamily(element), fontSize, fontStyle, GraphicsUnit.Pixel);
-
-                if (element.NoWrap)
-                {
-                    var singleLineSize = _measureGraphics.MeasureString(element.Text, font, new PointF(0, 0), _defaultStringFormat);
-                    return singleLineSize.Height;
-                }
-
-                // 如果有宽度约束，传入宽度；否则传入虽大宽度
-                float maxWidth = widthConstraint > 0 ? widthConstraint : 100000f;
-                var size = _measureGraphics.MeasureString(element.Text, font, (int)Math.Ceiling(maxWidth), _defaultStringFormat);
-                
-                return size.Height;
-            }
-        }
-
-        private static string ResolveFontFamily(Win32Element element)
-        {
-            if (!string.IsNullOrEmpty(element.FontFamily))
-                return element.FontFamily;
-
-            return IsLikelyEmojiOrSymbol(element.Text) ? "Segoe UI Emoji" : "Segoe UI";
-        }
-
-        private static bool IsLikelyEmojiOrSymbol(string? text)
-        {
-            if (string.IsNullOrEmpty(text)) return false;
-            foreach (var c in text)
-            {
-                if (char.IsSurrogate(c)) return true;
-                if (c >= 0x2000 && c <= 0x33FF) return true;
-            }
-            return false;
+            float? maxWidth = element.NoWrap ? null : widthConstraint > 0 ? widthConstraint : 100000f;
+            var size = GdiText.MeasureText(element.Text, element.FontFamily, fontSize, element.FontWeight, maxWidth, element.NoWrap);
+            return size.Height;
         }
 
         private static (float Left, float Top, float Right, float Bottom) ResolveSpacing(

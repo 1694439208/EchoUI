@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Runtime.InteropServices;
 using EchoUI.Core;
 
@@ -15,6 +14,11 @@ namespace EchoUI.Render.Win32
         private readonly int _height;
         private Win32Renderer? _renderer;
         private bool _trackingMouse;
+        private nint _backBufferDc;
+        private nint _backBufferBitmap;
+        private nint _backBufferOldBitmap;
+        private int _backBufferWidth;
+        private int _backBufferHeight;
 
         // 防止 WndProc 委托被 GC 回收
         private NativeInterop.WndProc? _wndProcDelegate;
@@ -56,7 +60,7 @@ namespace EchoUI.Render.Win32
 
             // 计算包含标题栏和边框的窗口尺寸，确保客户区为指定大小
             uint dwStyle = NativeInterop.WS_OVERLAPPEDWINDOW | NativeInterop.WS_CLIPCHILDREN;
-            uint dwExStyle = NativeInterop.WS_EX_COMPOSITED;
+            uint dwExStyle = 0;
             var rect = new NativeInterop.RECT { Left = 0, Top = 0, Right = _width, Bottom = _height };
             NativeInterop.AdjustWindowRectEx(ref rect, dwStyle, false, dwExStyle);
 
@@ -186,6 +190,7 @@ namespace EchoUI.Render.Win32
                     return 0;
 
                 case NativeInterop.WM_DESTROY:
+                    DisposeBackBuffer();
                     _renderer?.Dispose();
                     _renderer = null;
                     NativeInterop.PostQuitMessage(0);
@@ -332,13 +337,12 @@ namespace EchoUI.Render.Win32
                     FlexLayout.ComputeLayout(_renderer.RootElement, w, h);
                     _renderer.UpdateAllEditPositions(w, h);
 
-                    // 双缓冲绘制
-                    using var bitmap = new Bitmap(w, h);
-                    using var g = Graphics.FromImage(bitmap);
-                    GdiPainter.Paint(g, _renderer.RootElement, _renderer.FloatingElements, w, h);
-
-                    using var screenGraphics = Graphics.FromHdc(ps.hdc);
-                    screenGraphics.DrawImageUnscaled(bitmap, 0, 0);
+                    var memoryDc = EnsureBackBuffer(ps.hdc, w, h);
+                    if (memoryDc != 0)
+                    {
+                        GdiPainter.Paint(memoryDc, _renderer.RootElement, _renderer.FloatingElements, w, h);
+                        NativeInterop.BitBlt(ps.hdc, 0, 0, w, h, memoryDc, 0, 0, NativeInterop.SRCCOPY);
+                    }
                 }
             }
             finally
@@ -347,8 +351,55 @@ namespace EchoUI.Render.Win32
             }
         }
 
+        private nint EnsureBackBuffer(nint referenceDc, int width, int height)
+        {
+            if (_backBufferDc != 0 && _backBufferWidth == width && _backBufferHeight == height)
+                return _backBufferDc;
+
+            DisposeBackBuffer();
+
+            var memoryDc = NativeInterop.CreateCompatibleDC(referenceDc);
+            if (memoryDc == 0)
+                return 0;
+
+            var bitmap = NativeInterop.CreateCompatibleBitmap(referenceDc, width, height);
+            if (bitmap == 0)
+            {
+                NativeInterop.DeleteDC(memoryDc);
+                return 0;
+            }
+
+            _backBufferOldBitmap = NativeInterop.SelectObject(memoryDc, bitmap);
+            _backBufferDc = memoryDc;
+            _backBufferBitmap = bitmap;
+            _backBufferWidth = width;
+            _backBufferHeight = height;
+            return _backBufferDc;
+        }
+
+        private void DisposeBackBuffer()
+        {
+            if (_backBufferDc != 0)
+            {
+                if (_backBufferOldBitmap != 0)
+                    NativeInterop.SelectObject(_backBufferDc, _backBufferOldBitmap);
+
+                if (_backBufferBitmap != 0)
+                    NativeInterop.DeleteObject(_backBufferBitmap);
+
+                NativeInterop.DeleteDC(_backBufferDc);
+            }
+
+            _backBufferDc = 0;
+            _backBufferBitmap = 0;
+            _backBufferOldBitmap = 0;
+            _backBufferWidth = 0;
+            _backBufferHeight = 0;
+        }
+
         private void OnResize(nint hWnd)
         {
+            DisposeBackBuffer();
             _renderer?.RequestRelayout();
         }
 

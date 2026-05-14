@@ -1,4 +1,3 @@
-using System.Drawing;
 using EchoUI.Core;
 
 namespace EchoUI.Render.Win32
