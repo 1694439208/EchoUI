@@ -339,6 +339,23 @@ namespace EchoUI.Render.Win32
         [DllImport("gdi32.dll")]
         public static extern bool DeleteObject(nint hObject);
 
+        public const uint SRCCOPY = 0x00CC0020;
+
+        [DllImport("gdi32.dll")]
+        public static extern nint CreateCompatibleDC(nint hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint CreateCompatibleBitmap(nint hdc, int cx, int cy);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint SelectObject(nint hdc, nint hObject);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteDC(nint hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool BitBlt(nint hdcDest, int xDest, int yDest, int width, int height, nint hdcSrc, int xSrc, int ySrc, uint rop);
+
         [DllImport("imm32.dll")]
         public static extern nint ImmGetContext(nint hWnd);
 

@@ -43,6 +43,7 @@ namespace EchoUI.Render.Win32
 
             // 停止同元素同属性的已有动画
             StopAnimation(element, propertyName);
+            SetElementProperty(element, propertyName, fromValue);
 
             _animations.Add(new ActiveAnimation
             {
@@ -156,6 +157,7 @@ namespace EchoUI.Render.Win32
             }
 
             bool anyUpdated = false;
+            bool needsRelayout = false;
 
             for (int i = _animations.Count - 1; i >= 0; i--)
             {
@@ -169,6 +171,7 @@ namespace EchoUI.Render.Win32
                     SetElementProperty(anim.Element, anim.PropertyName, anim.ToValue);
                     _animations.RemoveAt(i);
                     anyUpdated = true;
+                    needsRelayout |= IsLayoutProperty(anim.PropertyName);
                 }
                 else
                 {
@@ -176,14 +179,16 @@ namespace EchoUI.Render.Win32
                     var current = Interpolate(anim.FromValue, anim.ToValue, easedT);
                     SetElementProperty(anim.Element, anim.PropertyName, current);
                     anyUpdated = true;
+                    needsRelayout |= IsLayoutProperty(anim.PropertyName);
                 }
             }
 
             if (anyUpdated)
             {
-                // 布局属性变化需要完整 relayout，仅视觉属性变化只需 repaint
-                // 为简单起见统一 RequestRelayout (内部含 InvalidateRect)
-                _renderer.RequestRelayout();
+                if (needsRelayout)
+                    _renderer.RequestRelayout();
+                else
+                    _renderer.RequestRepaint();
 
                 if (_animations.Count == 0)
                     StopTimer();
@@ -321,6 +326,24 @@ namespace EchoUI.Render.Win32
         }
 
         // --- 辅助 ---
+
+        private static bool IsLayoutProperty(string propName)
+        {
+            return propName switch
+            {
+                nameof(Win32Element.BorderWidth) => true,
+                nameof(Win32Element.Margin) => true,
+                nameof(Win32Element.Padding) => true,
+                nameof(Win32Element.Width) => true,
+                nameof(Win32Element.Height) => true,
+                nameof(Win32Element.MinWidth) => true,
+                nameof(Win32Element.MinHeight) => true,
+                nameof(Win32Element.MaxWidth) => true,
+                nameof(Win32Element.MaxHeight) => true,
+                nameof(Win32Element.Gap) => true,
+                _ => false
+            };
+        }
 
         private static bool ValuesEqual(object? a, object? b)
         {

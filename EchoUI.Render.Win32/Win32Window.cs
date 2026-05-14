@@ -16,6 +16,13 @@ namespace EchoUI.Render.Win32
         private Win32Renderer? _renderer;
         private bool _trackingMouse;
 
+        // 双缓冲 GDI 资源缓存，避免每帧分配
+        private nint _backBufferDc;
+        private nint _backBufferBitmap;
+        private nint _oldBackBufferBitmap;
+        private int _backBufferWidth;
+        private int _backBufferHeight;
+
         // 防止 WndProc 委托被 GC 回收
         private NativeInterop.WndProc? _wndProcDelegate;
 
@@ -44,11 +51,11 @@ namespace EchoUI.Render.Win32
             var wc = new NativeInterop.WNDCLASSEX
             {
                 cbSize = Marshal.SizeOf<NativeInterop.WNDCLASSEX>(),
-                style = 0x0003, // CS_HREDRAW | CS_VREDRAW
+                style = 0,
                 lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate),
                 hInstance = hInstance,
                 hCursor = NativeInterop.LoadCursor(0, NativeInterop.IDC_ARROW),
-                hbrBackground = NativeInterop.GetStockObject(NativeInterop.WHITE_BRUSH),
+                hbrBackground = 0,
                 lpszClassName = "EchoUIWin32Class"
             };
 
@@ -56,7 +63,7 @@ namespace EchoUI.Render.Win32
 
             // 计算包含标题栏和边框的窗口尺寸，确保客户区为指定大小
             uint dwStyle = NativeInterop.WS_OVERLAPPEDWINDOW | NativeInterop.WS_CLIPCHILDREN;
-            uint dwExStyle = NativeInterop.WS_EX_COMPOSITED;
+            uint dwExStyle = 0;
             var rect = new NativeInterop.RECT { Left = 0, Top = 0, Right = _width, Bottom = _height };
             NativeInterop.AdjustWindowRectEx(ref rect, dwStyle, false, dwExStyle);
 
@@ -190,6 +197,7 @@ namespace EchoUI.Render.Win32
                     return 0;
 
                 case NativeInterop.WM_DESTROY:
+                    ReleaseBackBuffer();
                     _renderer?.Dispose();
                     _renderer = null;
                     NativeInterop.PostQuitMessage(0);
@@ -332,23 +340,61 @@ namespace EchoUI.Render.Win32
 
                 if (w > 0 && h > 0 && _renderer?.RootElement != null)
                 {
-                    // 确保布局已计算
-                    FlexLayout.ComputeLayout(_renderer.RootElement, w, h);
-                    _renderer.UpdateAllEditPositions(w, h);
+                    // 确保布局已计算（仅在首次或尚未 layout 时）
+                    if (_renderer.RootElement.LayoutWidth <= 0)
+                    {
+                        FlexLayout.ComputeLayout(_renderer.RootElement, w, h);
+                        _renderer.UpdateAllEditPositions(w, h);
+                    }
 
-                    // 双缓冲绘制
-                    using var bitmap = new Bitmap(w, h);
-                    using var g = Graphics.FromImage(bitmap);
-                    GdiPainter.Paint(g, _renderer.RootElement, _renderer.FloatingElements, w, h);
+                    EnsureBackBuffer(ps.hdc, w, h);
 
-                    using var screenGraphics = Graphics.FromHdc(ps.hdc);
-                    screenGraphics.DrawImageUnscaled(bitmap, 0, 0);
+                    using (var g = Graphics.FromHdc(_backBufferDc))
+                    {
+                        GdiPainter.Paint(g, _renderer.RootElement, _renderer.FloatingElements, w, h);
+                    }
+
+                    NativeInterop.BitBlt(ps.hdc, 0, 0, w, h, _backBufferDc, 0, 0, NativeInterop.SRCCOPY);
                 }
             }
             finally
             {
                 NativeInterop.EndPaint(hWnd, ref ps);
             }
+        }
+
+        private void EnsureBackBuffer(nint paintDc, int width, int height)
+        {
+            if (_backBufferDc != 0 && _backBufferWidth == width && _backBufferHeight == height)
+                return;
+
+            ReleaseBackBuffer();
+
+            _backBufferDc = NativeInterop.CreateCompatibleDC(paintDc);
+            _backBufferBitmap = NativeInterop.CreateCompatibleBitmap(paintDc, width, height);
+            _oldBackBufferBitmap = NativeInterop.SelectObject(_backBufferDc, _backBufferBitmap);
+            _backBufferWidth = width;
+            _backBufferHeight = height;
+        }
+
+        private void ReleaseBackBuffer()
+        {
+            if (_backBufferDc != 0)
+            {
+                if (_oldBackBufferBitmap != 0)
+                    NativeInterop.SelectObject(_backBufferDc, _oldBackBufferBitmap);
+
+                if (_backBufferBitmap != 0)
+                    NativeInterop.DeleteObject(_backBufferBitmap);
+
+                NativeInterop.DeleteDC(_backBufferDc);
+            }
+
+            _backBufferDc = 0;
+            _backBufferBitmap = 0;
+            _oldBackBufferBitmap = 0;
+            _backBufferWidth = 0;
+            _backBufferHeight = 0;
         }
 
         private void OnResize(nint hWnd)
