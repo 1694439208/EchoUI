@@ -122,11 +122,11 @@ namespace EchoUI.Render.Win32
             switch (newProps)
             {
                 case ContainerProps p:
-                    element.Direction = p.Direction ?? LayoutDirection.Vertical;
-                    element.JustifyContent = p.JustifyContent ?? JustifyContent.Start;
-                    element.AlignItems = p.AlignItems ?? AlignItems.Start;
-                    element.FlexShrink = p.FlexShrink ?? 0;
-                    element.FlexGrow = p.FlexGrow ?? 0;
+                    element.Direction = p.Direction ?? LayoutDefaults.Direction;
+                    element.JustifyContent = p.JustifyContent ?? LayoutDefaults.JustifyContent;
+                    element.AlignItems = p.AlignItems ?? LayoutDefaults.AlignItems;
+                    element.FlexShrink = p.FlexShrink ?? LayoutDefaults.FlexShrink;
+                    element.FlexGrow = p.FlexGrow ?? LayoutDefaults.FlexGrow;
                     break;
                 case TextProps p:
                     element.MouseThrough = p.MouseThrough;
@@ -282,22 +282,22 @@ namespace EchoUI.Render.Win32
 
                 // Flex
                 case nameof(ContainerProps.Direction):
-                    element.Direction = propValue is LayoutDirection dir ? dir : LayoutDirection.Vertical;
+                    element.Direction = propValue is LayoutDirection dir ? dir : LayoutDefaults.Direction;
                     break;
                 case nameof(ContainerProps.JustifyContent):
-                    element.JustifyContent = propValue is JustifyContent jc ? jc : JustifyContent.Start;
+                    element.JustifyContent = propValue is JustifyContent jc ? jc : LayoutDefaults.JustifyContent;
                     break;
                 case nameof(ContainerProps.AlignItems):
-                    element.AlignItems = propValue is AlignItems ai ? ai : AlignItems.Start;
+                    element.AlignItems = propValue is AlignItems ai ? ai : LayoutDefaults.AlignItems;
                     break;
                 case nameof(ContainerProps.FlexGrow):
-                    element.FlexGrow = propValue is float fg ? fg : 0;
+                    element.FlexGrow = propValue is float fg ? fg : LayoutDefaults.FlexGrow;
                     break;
                 case nameof(ContainerProps.FlexShrink):
-                    element.FlexShrink = propValue is float fs ? fs : 0;
+                    element.FlexShrink = propValue is float fs ? fs : LayoutDefaults.FlexShrink;
                     break;
                 case nameof(ContainerProps.Gap):
-                    element.Gap = propValue is float gap ? gap : 0;
+                    element.Gap = propValue is float gap ? gap : LayoutDefaults.Gap;
                     break;
                 case nameof(ContainerProps.Float):
                     element.Float = propValue is true;

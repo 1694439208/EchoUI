@@ -140,23 +140,25 @@ namespace EchoUI.Core
 
         // --- 子元素布局与内边距 ---
         /// <summary>
-        /// 子元素的布局方向（垂直或水平）。
+        /// 子元素的布局方向。未设置时默认为 Vertical（纵向排列）。
         /// </summary>
         public LayoutDirection? Direction { get; init; } = LayoutDirection.Vertical;
         /// <summary>
-        /// 子元素在主轴上的对齐方式。
+        /// 子元素在主轴上的对齐方式。未设置时默认为 Start。
         /// </summary>
         public JustifyContent? JustifyContent { get; init; }
         /// <summary>
-        /// 子元素在交叉轴上的对齐方式。
+        /// 子元素在交叉轴上的对齐方式。未设置时默认为 Stretch（子元素撑满交叉轴）。
         /// </summary>
         public AlignItems? AlignItems { get; init; }
         /// <summary>
-        /// 子元素在主轴上的放大比例。
+        /// 子元素在主轴上的放大比例。未设置时默认为 0（不自动增长）。
         /// </summary>
         public float? FlexGrow { get; init; }
         /// <summary>
-        /// 子元素在主轴上的缩小比例。
+        /// 子元素在主轴上的缩小比例。未设置时默认为 0（不自动收缩）。
+        /// 注意：CSS Flexbox 默认为 1，但 EchoUI 的 FlexLayout 中 shrink 会压缩用于判断溢出的
+        /// 内容尺寸，导致 Overflow.Auto/Scroll 失效，故默认关闭。
         /// </summary>
         public float? FlexShrink { get; init; }
         /// <summary>

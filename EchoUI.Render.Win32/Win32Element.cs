@@ -66,14 +66,14 @@ namespace EchoUI.Render.Win32
         public Spacing? Padding { get; set; }
 
         // --- Flex 布局 ---
-        public LayoutDirection Direction { get; set; } = LayoutDirection.Vertical;
-        public JustifyContent JustifyContent { get; set; } = JustifyContent.Start;
-        public AlignItems AlignItems { get; set; } = AlignItems.Start;
-        public float FlexGrow { get; set; }
-        public float FlexShrink { get; set; }
-        public float Gap { get; set; }
+        public LayoutDirection Direction { get; set; } = LayoutDefaults.Direction;
+        public JustifyContent JustifyContent { get; set; } = LayoutDefaults.JustifyContent;
+        public AlignItems AlignItems { get; set; } = LayoutDefaults.AlignItems;
+        public float FlexGrow { get; set; } = LayoutDefaults.FlexGrow;
+        public float FlexShrink { get; set; } = LayoutDefaults.FlexShrink;
+        public float Gap { get; set; } = LayoutDefaults.Gap;
         public bool Float { get; set; }
-        public Overflow Overflow { get; set; } = Overflow.Visible;
+        public Overflow Overflow { get; set; } = LayoutDefaults.Overflow;
 
         // --- 外观 ---
         public Core.Color? BackgroundColor { get; set; }
