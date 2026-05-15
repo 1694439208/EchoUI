@@ -31,6 +31,15 @@ public static class AnimationDemo
                 ShowcaseGrid(on, toggle),
                 EasingTheater(on),
                 BuiltInControls(),
+                Section("Interactive Controls", "All built-in controls with live state — Button / Input / TextInput / CheckBox / Switch / ComboBox / RadioGroup", [
+                    new Element((Component)ControlsInteract, new Props())
+                ]),
+                Section("Layout Showcase", "Flex layout visualization — Direction / JustifyContent / AlignItems with live selector", [
+                    new Element((Component)LayoutShowcase, new Props())
+                ]),
+                Section("Counter Demo", "Reactive state management with conditional styling", [
+                    new Element((Component)CounterDemo, new Props())
+                ]),
                 SupportedProperties()
             ]
         });
@@ -572,6 +581,243 @@ public static class AnimationDemo
             [
                 Text(new TextProps { Text = name, Color = Color.White, FontSize = 12, FontWeight = "800" }),
                 Text(new TextProps { Text = type, Color = Color.FromHex("#64748B"), FontSize = 11 })
+            ]
+        });
+    }
+
+    // --- Interactive section components ---
+
+    private static Element? ControlsInteract(Props _)
+    {
+        var (btnClicks, _, updateBtnClicks) = State(0);
+        var (inputVal, setInputVal, _) = State("");
+        var (textInputVal, setTextInputVal, _) = State("");
+        var (comboIdx, setComboIdx, _) = State(0);
+        var (radioIdx, setRadioIdx, _) = State(0);
+
+        var colors = new[] { "Red", "Green", "Blue", "Purple" };
+        var sizes = new[] { "XS", "SM", "MD", "LG", "XL" };
+
+        return Container(new ContainerProps
+        {
+            Width = Dimension.Percent(100),
+            Direction = LayoutDirection.Vertical,
+            Gap = 14,
+            Children =
+            [
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    Gap = 10,
+                    AlignItems = AlignItems.Center,
+                    Children =
+                    [
+                        Button(new ButtonProps { Text = $"Click ({btnClicks.Value})", OnClick = _ => updateBtnClicks(v => v + 1) }),
+                        Button(new ButtonProps { Text = "Primary", BackgroundColor = Color.FromHex("#2563EB"), TextColor = Color.White }),
+                        Button(new ButtonProps { Text = "Danger", BackgroundColor = Color.FromHex("#EF4444"), TextColor = Color.White }),
+                        Button(new ButtonProps { Text = "Ghost", BackgroundColor = Color.FromHex("#1E293B"), TextColor = Color.FromHex("#CBD5E1") })
+                    ]
+                }),
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    Gap = 10,
+                    AlignItems = AlignItems.Center,
+                    Children =
+                    [
+                        Container(new ContainerProps { FlexGrow = 1, Children = [ Input(new InputProps { Value = inputVal.Value, OnValueChanged = v => setInputVal(v), BackgroundColor = Color.FromHex("#1E293B"), TextColor = Color.FromHex("#E2E8F0") }) ] }),
+                        Container(new ContainerProps { Width = Dimension.Pixels(60), Children = [ Text(new TextProps { Text = $"{inputVal.Value.Length} chars", Color = Color.FromHex("#94A3B8"), FontSize = 11 })] })
+                    ]
+                }),
+                Container(new ContainerProps { Width = Dimension.Percent(100), Children = [ TextInput(new TextInputProps { Value = textInputVal.Value, OnValueChanged = v => setTextInputVal(v), Width = Dimension.Percent(100) }) ] }),
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    Gap = 18,
+                    AlignItems = AlignItems.Center,
+                    Children =
+                    [
+                        Container(new ContainerProps { Direction = LayoutDirection.Horizontal, AlignItems = AlignItems.Center, Gap = 6, Children = [ Switch(new SwitchProps { DefaultIsOn = false, OnColor = Color.FromHex("#7C3AED") }), Text(new TextProps { Text = "Enable", Color = Color.FromHex("#94A3B8"), FontSize = 12 }) ] }),
+                        CheckBox(new CheckBoxProps { Label = "Remember", IsChecked = true, CheckColor = Color.FromHex("#22C55E") }),
+                        Container(new ContainerProps { Width = Dimension.Pixels(150), Children = [ ComboBox(new ComboBoxProps { Options = colors, SelectedIndex = comboIdx.Value, OnSelectionChanged = v => setComboIdx(v) }) ] })
+                    ]
+                }),
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    AlignItems = AlignItems.Center,
+                    Gap = 16,
+                    Children =
+                    [
+                        RadioGroup(new RadioGroupProps { Options = sizes, SelectedIndex = radioIdx.Value, OnSelectionChanged = v => setRadioIdx(v), Direction = LayoutDirection.Horizontal, SelectedColor = Color.FromHex("#7C3AED") }),
+                        Text(new TextProps { Text = $"Size: {sizes[radioIdx.Value]}  |  Color: {colors[comboIdx.Value]}", Color = Color.FromHex("#94A3B8"), FontSize = 12 })
+                    ]
+                })
+            ]
+        });
+    }
+
+    private static Element? LayoutShowcase(Props _)
+    {
+        var (dirIdx, setDirIdx, _) = State(0);
+        var (justifyIdx, setJustifyIdx, _) = State(0);
+        var (alignIdx, setAlignIdx, _) = State(0);
+        Action<int> onDirChange = idx => setDirIdx(idx);
+        Action<int> onJustifyChange = idx => setJustifyIdx(idx);
+        Action<int> onAlignChange = idx => setAlignIdx(idx);
+
+        var direction = dirIdx == 0 ? LayoutDirection.Vertical : LayoutDirection.Horizontal;
+        var justifyValues = new[] { JustifyContent.Start, JustifyContent.Center, JustifyContent.End, JustifyContent.SpaceBetween, JustifyContent.SpaceAround };
+        var alignValues = new[] { AlignItems.Start, AlignItems.Center, AlignItems.End, AlignItems.Stretch };
+
+        var c1 = Color.FromHex("#EF4444"); var c2 = Color.FromHex("#22C55E");
+        var c3 = Color.FromHex("#3B82F6"); var c4 = Color.FromHex("#A855F7");
+
+        return Container(new ContainerProps
+        {
+            Width = Dimension.Percent(100),
+            Direction = LayoutDirection.Vertical,
+            Gap = 18,
+            Children =
+            [
+                // Direction
+                FlexDemo("Direction", dirIdx, onDirChange, ["Vertical", "Horizontal"], c =>
+                    Container(new ContainerProps
+                    {
+                        Width = Dimension.Percent(100), Height = Dimension.Pixels(90),
+                        BackgroundColor = Color.FromHex("#1E293B"), BorderRadius = 8,
+                        Padding = new Spacing(Dimension.Pixels(10)),
+                        Direction = direction, Gap = 6,
+                        Children =
+                        [
+                            Box(c1, direction == LayoutDirection.Horizontal ? Dimension.Pixels(50) : null, direction == LayoutDirection.Vertical ? Dimension.Pixels(50) : null),
+                            Box(c2, direction == LayoutDirection.Horizontal ? Dimension.Pixels(70) : null, direction == LayoutDirection.Vertical ? Dimension.Pixels(70) : null),
+                            Box(c3, direction == LayoutDirection.Horizontal ? Dimension.Pixels(60) : null, direction == LayoutDirection.Vertical ? Dimension.Pixels(60) : null),
+                            Box(c4, direction == LayoutDirection.Horizontal ? Dimension.Pixels(44) : null, direction == LayoutDirection.Vertical ? Dimension.Pixels(44) : null)
+                        ]
+                    })
+                ),
+                // JustifyContent
+                FlexDemo("JustifyContent", justifyIdx, onJustifyChange, ["Start", "Center", "End", "SpaceBetween", "SpaceAround"], c =>
+                    Container(new ContainerProps
+                    {
+                        Width = Dimension.Percent(100), Height = Dimension.Pixels(50),
+                        BackgroundColor = Color.FromHex("#1E293B"), BorderRadius = 8,
+                        Padding = new Spacing(Dimension.Pixels(10)),
+                        Direction = LayoutDirection.Horizontal,
+                        JustifyContent = justifyValues[justifyIdx], Gap = 4,
+                        Children =
+                        [
+                            Container(new ContainerProps { Width = Dimension.Pixels(28), Height = Dimension.Pixels(28), BackgroundColor = c1, BorderRadius = 6 }),
+                            Container(new ContainerProps { Width = Dimension.Pixels(28), Height = Dimension.Pixels(28), BackgroundColor = c2, BorderRadius = 6 }),
+                            Container(new ContainerProps { Width = Dimension.Pixels(28), Height = Dimension.Pixels(28), BackgroundColor = c3, BorderRadius = 6 })
+                        ]
+                    })
+                ),
+                // AlignItems
+                FlexDemo("AlignItems", alignIdx, onAlignChange, ["Start", "Center", "End", "Stretch"], c =>
+                    Container(new ContainerProps
+                    {
+                        Width = Dimension.Percent(100), Height = Dimension.Pixels(80),
+                        BackgroundColor = Color.FromHex("#1E293B"), BorderRadius = 8,
+                        Padding = new Spacing(Dimension.Pixels(10)),
+                        Direction = LayoutDirection.Horizontal,
+                        AlignItems = alignValues[alignIdx], Gap = 4,
+                        Children =
+                        [
+                            Container(new ContainerProps { Width = Dimension.Pixels(40), Height = Dimension.Pixels(28), BackgroundColor = c1, BorderRadius = 6, Children = [Text(new TextProps { Text = "28", Color = Color.White, FontSize = 10 })] }),
+                            Container(new ContainerProps { Width = Dimension.Pixels(40), Height = Dimension.Pixels(56), BackgroundColor = c2, BorderRadius = 6, Children = [Text(new TextProps { Text = "56", Color = Color.White, FontSize = 10 })] }),
+                            Container(new ContainerProps { Width = Dimension.Pixels(40), Height = Dimension.Pixels(40), BackgroundColor = c3, BorderRadius = 6, Children = [Text(new TextProps { Text = "40", Color = Color.White, FontSize = 10 })] })
+                        ]
+                    })
+                )
+            ]
+        });
+    }
+
+    private static Element FlexDemo(string label, int idx, Action<int> setIdx, string[] options, Func<int, Element> content)
+    {
+        return Container(new ContainerProps
+        {
+            Direction = LayoutDirection.Vertical,
+            Gap = 8,
+            Children =
+            [
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    AlignItems = AlignItems.Center,
+                    Gap = 12,
+                    Children =
+                    [
+                        Text(new TextProps { Text = $"{label}:", Color = Color.FromHex("#CBD5E1"), FontWeight = "700" }),
+                        Container(new ContainerProps { Width = Dimension.Pixels(180), Children = [ ComboBox(new ComboBoxProps { Options = options, SelectedIndex = idx, OnSelectionChanged = v => setIdx(v), BackgroundColor = Color.FromHex("#1E293B"), TextColor = Color.FromHex("#E2E8F0"), BorderColor = Color.FromHex("#334155") }) ] })
+                    ]
+                }),
+                content(idx)
+            ]
+        });
+    }
+
+    private static Element Box(Color color, Dimension? w, Dimension? h)
+    {
+        return Container(new ContainerProps
+        {
+            Width = w ?? Dimension.Pixels(36),
+            Height = h ?? Dimension.Pixels(36),
+            BackgroundColor = color, BorderRadius = 6,
+            JustifyContent = JustifyContent.Center,
+            AlignItems = AlignItems.Center,
+            Children = [Text(new TextProps { Text = "#", Color = Color.White, FontSize = 14, FontWeight = "700" })]
+        });
+    }
+
+    private static Element? CounterDemo(Props _)
+    {
+        var (count, setCount, updateCount) = State(0);
+
+        return Container(new ContainerProps
+        {
+            Direction = LayoutDirection.Vertical,
+            AlignItems = AlignItems.Center,
+            Gap = 18,
+            Padding = new Spacing(Dimension.Pixels(24)),
+            Width = Dimension.Percent(100),
+            Children =
+            [
+                Text(new TextProps
+                {
+                    Text = $"{count.Value}",
+                    FontSize = 48,
+                    FontWeight = "Bold",
+                    Color = count.Value == 0 ? Color.FromHex("#CBD5E1") : (count.Value < 0 ? Color.FromHex("#EF4444") : Color.FromHex("#22C55E"))
+                }),
+                Container(new ContainerProps
+                {
+                    Direction = LayoutDirection.Horizontal,
+                    Gap = 14,
+                    AlignItems = AlignItems.Center,
+                    Children =
+                    [
+                        Button(new ButtonProps { Text = "\u2212", Width = Dimension.Pixels(56), Height = Dimension.Pixels(44), OnClick = _ => updateCount(v => v - 1) }),
+                        Button(new ButtonProps { Text = "Reset", Width = Dimension.Pixels(96), Height = Dimension.Pixels(44), BackgroundColor = Color.FromHex("#475569"), TextColor = Color.White, OnClick = _ => setCount(0) }),
+                        Button(new ButtonProps { Text = "+", Width = Dimension.Pixels(56), Height = Dimension.Pixels(44), OnClick = _ => updateCount(v => v + 1) })
+                    ]
+                }),
+                Container(new ContainerProps
+                {
+                    Width = Dimension.Percent(100),
+                    Height = Dimension.Pixels(4),
+                    BackgroundColor = count.Value == 0 ? Color.FromHex("#334155") : (count.Value < 0 ? Color.FromHex("#7F1D1D") : Color.FromHex("#064E3B")),
+                    BorderRadius = 2,
+                    Transitions = [ [nameof(ContainerProps.BackgroundColor), new Transition(250, Easing.EaseInOut)] ]
+                }),
+                Text(new TextProps
+                {
+                    Text = count.Value == 0 ? "Zero \u2014 click + or \u2212 to start" : count.Value < 0 ? $"Negative ({count.Value})" : $"Positive (+{count.Value})",
+                    FontSize = 13,
+                    Color = count.Value == 0 ? Color.FromHex("#64748B") : (count.Value < 0 ? Color.FromHex("#FCA5A5") : Color.FromHex("#86EFAC"))
+                })
             ]
         });
     }
