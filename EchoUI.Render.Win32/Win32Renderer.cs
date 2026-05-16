@@ -322,6 +322,15 @@ namespace EchoUI.Render.Win32
                 case nameof(ContainerProps.BorderRadius):
                     element.BorderRadius = propValue is float br ? br : 0;
                     break;
+                case nameof(ContainerProps.ShadowColor):
+                    element.ShadowColor = propValue as Core.Color?;
+                    break;
+                case nameof(ContainerProps.Opacity):
+                    element.Opacity = propValue is float op ? op : 1f;
+                    break;
+                case nameof(ContainerProps.Cursor):
+                    element.Cursor = propValue as string;
+                    break;
                 case nameof(ContainerProps.InputMethodAnchorPoint):
                     element.InputMethodAnchorPoint = propValue is Core.Point point ? point : null;
                     if (element.IsFocused)

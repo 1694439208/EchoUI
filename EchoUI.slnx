@@ -1,8 +1,9 @@
 <Solution>
   <Folder Name="/Demo/">
+    <Project Path="EchoUI.Demo/EchoUI.Demo.csproj" />
     <Project Path="EchoUI.Demo.Web/EchoUI.Demo.Web.csproj" />
     <Project Path="EchoUI.Demo.Win32/EchoUI.Demo.Win32.csproj" />
-    <Project Path="EchoUI.Demo/EchoUI.Demo.csproj" />
+    <Project Path="EchoUI.AnimalIsland/EchoUI.AnimalIsland.csproj" />
   </Folder>
   <Folder Name="/EchoUI/">
     <Project Path="EchoUI.Core/EchoUI.Core.csproj" />

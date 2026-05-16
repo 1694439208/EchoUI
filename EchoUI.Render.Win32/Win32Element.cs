@@ -82,6 +82,9 @@ namespace EchoUI.Render.Win32
         public BorderStyle BorderStyle { get; set; } = BorderStyle.None;
         public float BorderWidth { get; set; }
         public float BorderRadius { get; set; }
+        public Core.Color? ShadowColor { get; set; }
+        public float Opacity { get; set; } = 1f;
+        public string? Cursor { get; set; }
 
         // --- 文本属性 (Text 元素) ---
         public string? Text { get; set; }

@@ -87,7 +87,7 @@ namespace EchoUI.Core
                         AlignItems = AlignItems.Center,
                         Padding = new Spacing(Dimension.Pixels(12), Dimension.Pixels(8)),
                         BackgroundColor = isActive
-                            ? (props.ActiveTabBackgroundColor ?? Color.Gainsboro)
+                            ? (props.ActiveTabBackgroundColor ?? DesignTokens.PrimaryBg)
                             : props.InactiveTabBackgroundColor,
                         OnClick = _ => selectTab(index),
                         Children =
@@ -142,7 +142,7 @@ namespace EchoUI.Core
                     {
                         Direction = LayoutDirection.Horizontal,
                         Width = Dimension.Percent(100),
-                        BorderColor = Color.LightGray,
+                        BorderColor = DesignTokens.Border,
                         BorderWidth = 1,
                         BorderStyle = BorderStyle.Solid,
                         Children = tabHeaders

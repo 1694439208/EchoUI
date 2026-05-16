@@ -18,7 +18,7 @@ namespace EchoUI.Core
         /// <summary>
         /// 显示在复选框旁边的文本标签。
         /// </summary>
-        public string Label { get; init; }
+        public string? Label { get; init; }
 
         /// <summary>
         /// 勾选标记的颜色。
@@ -70,7 +70,7 @@ namespace EchoUI.Core
                                 {
                                     Text = "✓",
                                     FontSize = 16,
-                                    Color = props.CheckColor ?? Color.Black
+                                    Color = props.CheckColor ?? DesignTokens.Primary
                                 })
                                 : Empty()
                         ]

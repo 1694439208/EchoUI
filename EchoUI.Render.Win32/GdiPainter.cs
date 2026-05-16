@@ -108,12 +108,27 @@ namespace EchoUI.Render.Win32
         {
             var hasDrawableBounds = bounds.Width > 0 && bounds.Height > 0;
 
+            // ShadowColor 启用时，用"扩展范围 + 背景覆盖"实现底部跟随圆角的 Y 偏移阴影
+            if (hasDrawableBounds && element.ShadowColor is { A: > 0 } shadowCol)
+            {
+                var shadowH = element.BorderWidth;
+                if (shadowH > 0)
+                {
+                    // 先画扩展了阴影高度的圆角矩形（阴影色）
+                    var extendedBounds = new RectF(bounds.X, bounds.Y, bounds.Width, bounds.Height + shadowH);
+                    FillShape(hdc, element, extendedBounds, shadowCol, element.BorderRadius);
+                }
+            }
+
+            // 背景绘制（覆盖阴影的上部，底部露出跟随圆角的阴影条）
             if (hasDrawableBounds && element.BackgroundColor.HasValue && element.BackgroundColor.Value.A > 0)
             {
                 FillShape(hdc, element, bounds, element.BackgroundColor.Value, element.BorderRadius);
             }
 
-            if (hasDrawableBounds && element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
+            // ShadowColor 时 BorderWidth 专用于阴影高度，不再画全包围边框
+            var hasShadow = element.ShadowColor is { A: > 0 };
+            if (!hasShadow && hasDrawableBounds && element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
             {
                 DrawBorder(hdc, element, bounds, element.BorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
             }

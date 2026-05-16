@@ -468,7 +468,7 @@ namespace EchoUI.Core
                         AlignItems = AlignItems.Center,
                         Overflow = Overflow.Hidden,
                         Padding = props.Padding ?? new Spacing(Dimension.Pixels(10), Dimension.Pixels(6)),
-                        BackgroundColor = props.BackgroundColor ?? Color.White,
+                        BackgroundColor = props.BackgroundColor ?? DesignTokens.BgContent,
                         BorderWidth = 1,
                         BorderStyle = BorderStyle.Solid,
                         BorderColor = borderColor,
@@ -913,10 +913,10 @@ namespace EchoUI.Core
             var (isHovered, setIsHovered, _) = State(false);
 
             var backgroundColor = !itemProps.Enabled
-                ? Color.FromHex("#f3f4f6")
+                ? DesignTokens.BgDisabled
                 : isHovered.Value
-                    ? Color.FromHex("#eff6ff")
-                    : Color.White;
+                    ? DesignTokens.PrimaryBg
+                    : DesignTokens.BgContent;
 
             var textColor = itemProps.Enabled
                 ? (isHovered.Value ? Color.FromHex("#1d4ed8") : Color.Black)

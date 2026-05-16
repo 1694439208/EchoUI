@@ -79,7 +79,7 @@ namespace EchoUI.Core
                 Key = props.Key,
                 Width = Dimension.Pixels(widthPx),
                 Height = Dimension.Pixels(heightPx),
-                BackgroundColor = isOn.Value ? (props.OnColor ?? Color.Green) : (props.OffColor ?? Color.LightGray),
+                BackgroundColor = isOn.Value ? (props.OnColor ?? DesignTokens.Success) : (props.OffColor ?? DesignTokens.ShadowInput),
                 Transitions = trackTransitions,
                 BorderRadius = heightPx / 2,
                 Padding = new Spacing(Dimension.Pixels(paddingPx)),

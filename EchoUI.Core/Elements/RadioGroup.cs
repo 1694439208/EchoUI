@@ -75,7 +75,7 @@ namespace EchoUI.Core
                             BorderRadius = 10,
                             BorderWidth = 2,
                             BorderStyle = BorderStyle.Solid,
-                            BorderColor = props.BorderColor ?? Color.Gray,
+                            BorderColor = props.BorderColor ?? DesignTokens.Border,
                             JustifyContent = JustifyContent.Center,
                             AlignItems = AlignItems.Center,
                             Children =

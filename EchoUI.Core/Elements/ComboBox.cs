@@ -44,14 +44,14 @@ namespace EchoUI.Core
             var (selectIndex, setSelectIndex, _) = State(props.SelectedIndex);
             var (hoverIndex, setHoverIndex, _) = State(-1);
 
-            var backgroundColor = props.BackgroundColor ?? Color.White;
-            var textColor = props.TextColor ?? Color.FromHex("1F2937");
-            var borderColor = props.BorderColor ?? Color.FromHex("D0D7E2");
-            var dropdownBackgroundColor = props.DropdownBackgroundColor ?? Color.White;
-            var accentColor = Color.FromHex("4F8CFF");
-            var hoverBackgroundColor = Color.FromHex("F3F7FF");
+            var backgroundColor = props.BackgroundColor ?? DesignTokens.BgContent;
+            var textColor = props.TextColor ?? DesignTokens.TextBody;
+            var borderColor = props.BorderColor ?? DesignTokens.Border;
+            var dropdownBackgroundColor = props.DropdownBackgroundColor ?? DesignTokens.BgContent;
+            var accentColor = DesignTokens.Primary;
+            var hoverBackgroundColor = DesignTokens.PrimaryBg;
             var selectedBackgroundColor = Color.FromHex("EAF2FF");
-            var mutedTextColor = Color.FromHex("6B7280");
+            var mutedTextColor = DesignTokens.TextMuted;
 
             var selectedOptionText = (selectIndex.Value >= 0 && selectIndex.Value < props.Options.Count)
                 ? props.Options[selectIndex.Value]
