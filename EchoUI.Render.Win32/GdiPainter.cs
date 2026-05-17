@@ -54,6 +54,7 @@ namespace EchoUI.Render.Win32
                         PaintElement(hdc, floatElem, paintRect, null);
                     }
                 }
+
             }
             finally
             {
@@ -108,16 +109,11 @@ namespace EchoUI.Render.Win32
         {
             var hasDrawableBounds = bounds.Width > 0 && bounds.Height > 0;
 
-            // ShadowColor 启用时，用"扩展范围 + 背景覆盖"实现底部跟随圆角的 Y 偏移阴影
-            if (hasDrawableBounds && element.ShadowColor is { A: > 0 } shadowCol)
+            if (hasDrawableBounds && element.ShadowColor is { A: > 0 })
             {
-                var shadowH = element.BorderWidth;
-                if (shadowH > 0)
-                {
-                    // 先画扩展了阴影高度的圆角矩形（阴影色）
-                    var extendedBounds = new RectF(bounds.X, bounds.Y, bounds.Width, bounds.Height + shadowH);
-                    FillShape(hdc, element, extendedBounds, shadowCol, element.BorderRadius);
-                }
+                Win32CommandExecutor.ExecuteSingle(hdc, new DrawShadow(
+                    new LayoutBox(bounds.X, bounds.Y, bounds.Width, bounds.Height),
+                    element.ShadowColor.Value, element.BorderWidth, element.BorderRadius));
             }
 
             // 背景绘制（覆盖阴影的上部，底部露出跟随圆角的阴影条）
@@ -134,7 +130,6 @@ namespace EchoUI.Render.Win32
             }
 
             var childClip = clipRect;
-            var savedState = 0;
             uint gdiPlusState = 0;
             var previousClipRect = s_effectiveClipRect;
             var clipChanged = false;
@@ -143,7 +138,6 @@ namespace EchoUI.Render.Win32
             {
                 if (element.Overflow != Overflow.Visible)
                 {
-                    savedState = NativeInterop.SaveDC(hdc);
                     var clipRegion = RectF.Intersect(bounds, clipRect);
 
                     if (clipRegion.Width <= 0 || clipRegion.Height <= 0)
@@ -151,8 +145,8 @@ namespace EchoUI.Render.Win32
                         return;
                     }
 
-                    var clip = ToRect(clipRegion);
-                    NativeInterop.IntersectClipRect(hdc, clip.Left, clip.Top, clip.Right, clip.Bottom);
+                    Win32CommandExecutor.ExecuteSingle(hdc, new PushClip(
+                        new LayoutBox(clipRegion.X, clipRegion.Y, clipRegion.Width, clipRegion.Height)));
                     gdiPlusState = GdiPlus.SaveGraphics();
                     GdiPlus.IntersectClip(clipRegion);
                     childClip = clipRegion;
@@ -177,9 +171,9 @@ namespace EchoUI.Render.Win32
                     GdiPlus.RestoreGraphics(gdiPlusState);
                 }
 
-                if (savedState != 0)
+                if (clipChanged)
                 {
-                    NativeInterop.RestoreDC(hdc, savedState);
+                    Win32CommandExecutor.ExecuteSingle(hdc, new PopClip());
                 }
             }
 
@@ -315,7 +309,7 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private static void FillSolidRect(nint hdc, RectF rect, Core.Color color)
+        internal static void FillSolidRect(nint hdc, RectF rect, Core.Color color)
         {
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
@@ -330,7 +324,7 @@ namespace EchoUI.Render.Win32
             NativeInterop.FillRect(hdc, ref nativeRect, brush);
         }
 
-        private static void FillShape(nint hdc, Win32Element? element, RectF rect, Core.Color color, float radius)
+        internal static void FillShape(nint hdc, Win32Element? element, RectF rect, Core.Color color, float radius)
         {
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
@@ -365,7 +359,7 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private static void DrawBorder(nint hdc, Win32Element? element, RectF rect, Core.Color color, float width, float radius, Core.BorderStyle style)
+        internal static void DrawBorder(nint hdc, Win32Element? element, RectF rect, Core.Color color, float width, float radius, Core.BorderStyle style)
         {
             if (rect.Width <= 0 || rect.Height <= 0 || color.A == 0) return;
 
@@ -411,7 +405,7 @@ namespace EchoUI.Render.Win32
             }
         }
 
-        private static NativeInterop.RECT ToRect(RectF rect)
+        internal static NativeInterop.RECT ToRect(RectF rect)
         {
             return new NativeInterop.RECT
             {
