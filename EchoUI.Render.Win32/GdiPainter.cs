@@ -895,16 +895,20 @@ namespace EchoUI.Render.Win32
 
         public static void IntersectClip(RectF rect)
         {
-            if (s_graphics != 0 && rect.Width > 0 && rect.Height > 0)
-            {
-                NativeInterop.GdipSetClipRect(
-                    s_graphics,
-                    rect.X,
-                    rect.Y,
-                    rect.Width,
-                    rect.Height,
-                    NativeInterop.CombineModeIntersect);
-            }
+            if (s_graphics == 0) return;
+
+            // GDI+ GdipSetClipRect with CombineModeIntersect handles zero-area
+            // rects correctly (creates empty clip region), unlike the old guard
+            // that skipped the call entirely — which caused GDI+ drawn elements
+            // (rounded rects, shadows) to leak through zero-width PushClip
+            // (e.g. Tabs panels at 0% width during/after slide animation).
+            NativeInterop.GdipSetClipRect(
+                s_graphics,
+                rect.X,
+                rect.Y,
+                rect.Width,
+                rect.Height,
+                NativeInterop.CombineModeIntersect);
         }
 
         public static void Flush()

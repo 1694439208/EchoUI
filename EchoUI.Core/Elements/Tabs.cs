@@ -151,10 +151,10 @@ namespace EchoUI.Core
                     // Content Viewport (acts as a mask for the sliding track)
                     Container(new ContainerProps
                     {
-                        Direction = LayoutDirection.Horizontal,
                         Children = [contentTrack],
                         FlexGrow = 1,
-                        Width = Dimension.Percent(100)
+                        Width = Dimension.Percent(100),
+                        Overflow = Overflow.Hidden
                     })
                 ]
             });

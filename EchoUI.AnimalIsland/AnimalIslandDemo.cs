@@ -226,6 +226,7 @@ public static class AnimalIslandDemo
             FlexGrow = 1,
             Padding = new Spacing(Dimension.Pixels(30)),
             Direction = LayoutDirection.Vertical,
+            BackgroundColor = Color.Green,
             Gap = 20,
             Overflow = Overflow.Auto,
             Children =
@@ -253,6 +254,7 @@ public static class AnimalIslandDemo
             Direction = LayoutDirection.Vertical,
             Gap = 24,
             Overflow = Overflow.Auto,
+            BackgroundColor = Color.Green,
             Children =
             [
                 SectionTitle("Counter Demo"),
