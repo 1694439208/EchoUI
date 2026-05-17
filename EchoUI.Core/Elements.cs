@@ -169,8 +169,8 @@ namespace EchoUI.Core
         /// 元素的内边距。
         /// </summary>
         public Spacing? Padding { get; init; }
-        /// <summary>影子颜色（通过底部边框模拟 3D 投影）</summary>
-        public Color? ShadowColor { get; init; }
+        /// <summary>元素阴影。</summary>
+        public BoxShadow? Shadow { get; init; }
         /// <summary>光标样式 (例如 "pointer", "not-allowed")</summary>
         public string? Cursor { get; init; }
         /// <summary>元素透明度</summary>

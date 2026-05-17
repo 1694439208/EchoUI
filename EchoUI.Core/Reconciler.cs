@@ -64,6 +64,10 @@ namespace EchoUI.Core
             }
 
             _rootInstance = new ComponentInstance(rootElement, null, this);
+            if (_renderer is IInstanceBindingRenderer bindingRenderer)
+            {
+                bindingRenderer.AttachRootInstance(_rootInstance);
+            }
 
             var rendered = await RenderComponent(_rootInstance, _rootInstance.Element.Props);
             if (rendered != null)
@@ -158,6 +162,10 @@ namespace EchoUI.Core
             if (elementType.IsNative)
             {
                 instance.NativeElement = _renderer.CreateElement(elementType.AsNativeType);
+                if (_renderer is IInstanceBindingRenderer bindingRenderer)
+                {
+                    bindingRenderer.BindNativeElement(instance.NativeElement, instance);
+                }
                 var initialPatch = CreateInitialPatch(element.Props);
                 if (initialPatch != null)
                 {
@@ -534,6 +542,10 @@ namespace EchoUI.Core
             if (instance.NativeElement != null)
             {
                 var container = GetParentContainer(instance);
+                if (_renderer is IInstanceBindingRenderer bindingRenderer)
+                {
+                    bindingRenderer.UnbindNativeElement(instance.NativeElement);
+                }
                 _renderer.RemoveChild(container, instance.NativeElement);
             }
 

@@ -52,4 +52,11 @@
     {
         void Schedule(Func<Task> updateAction);
     }
+
+    public interface IInstanceBindingRenderer
+    {
+        void AttachRootInstance(ComponentInstance rootInstance);
+        void BindNativeElement(object nativeElement, ComponentInstance instance);
+        void UnbindNativeElement(object nativeElement);
+    }
 }

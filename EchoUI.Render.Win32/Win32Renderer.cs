@@ -9,7 +9,7 @@ namespace EchoUI.Render.Win32
     /// 使用 GDI+ 自绘模式，在单个 Win32 窗口上绘制所有 UI 元素。
     /// Input 元素使用嵌入的原生 Win32 Edit 控件。
     /// </summary>
-    public class Win32Renderer : IRenderer, IDisposable
+    public class Win32Renderer : IRenderer, IInstanceBindingRenderer, IDisposable
     {
         private readonly Win32Window _window;
         private Win32Element? _rootElement;
@@ -17,6 +17,7 @@ namespace EchoUI.Render.Win32
         private HitTestManager? _hitTestManager;
         private readonly List<Win32Element> _floatingElements = [];
         private readonly Win32AnimationManager _animationManager;
+        private ComponentInstance? _rootInstance;
 
         internal IReadOnlyList<Win32Element> FloatingElements => _floatingElements;
         internal Win32AnimationManager AnimationManager => _animationManager;
@@ -38,6 +39,7 @@ namespace EchoUI.Render.Win32
         private readonly HashSet<string> _nativeDiagnostics = [];
 
         internal Win32Element? RootElement => _rootElement;
+        internal ComponentInstance? RootInstance => _rootInstance;
         internal Win32UpdateScheduler? Scheduler => _scheduler;
         internal HitTestManager HitTestManager => _hitTestManager!;
 
@@ -53,6 +55,27 @@ namespace EchoUI.Render.Win32
         {
             _layoutValid = false;
             _layoutCacheGeneration++;
+        }
+
+        public void AttachRootInstance(ComponentInstance rootInstance)
+        {
+            _rootInstance = rootInstance;
+        }
+
+        public void BindNativeElement(object nativeElement, ComponentInstance instance)
+        {
+            if (nativeElement is Win32Element element)
+            {
+                element.OwnerInstance = instance;
+            }
+        }
+
+        public void UnbindNativeElement(object nativeElement)
+        {
+            if (nativeElement is Win32Element element)
+            {
+                element.OwnerInstance = null;
+            }
         }
 
         public object CreateElement(string type)
@@ -322,8 +345,8 @@ namespace EchoUI.Render.Win32
                 case nameof(ContainerProps.BorderRadius):
                     element.BorderRadius = propValue is float br ? br : 0;
                     break;
-                case nameof(ContainerProps.ShadowColor):
-                    element.ShadowColor = propValue as Core.Color?;
+                case nameof(ContainerProps.Shadow):
+                    element.Shadow = propValue is BoxShadow shadow ? shadow : BoxShadow.None;
                     break;
                 case nameof(ContainerProps.Opacity):
                     element.Opacity = propValue is float op ? op : 1f;
@@ -836,6 +859,7 @@ namespace EchoUI.Render.Win32
                 _rootElement = null;
             }
 
+            _rootInstance = null;
             _floatingElements.Clear();
             _editElements.Clear();
         }
@@ -881,6 +905,7 @@ namespace EchoUI.Render.Win32
             }
 
             FlexLayout.UpdateAbsoluteLayout(scrollTarget);
+            SyncInstanceLayouts();
             UpdateEditPositions(scrollTarget, vpW, vpH);
             RequestRepaint(scrollTarget);
         }
@@ -899,11 +924,54 @@ namespace EchoUI.Render.Win32
             }
 
             FlexLayout.ComputeLayout(_rootElement, vpW, vpH, _layoutCacheGeneration);
+            SyncInstanceLayouts();
             UpdateEditPositions(_rootElement, vpW, vpH);
             CollectFloatingElements();
             _layoutViewportWidth = vpW;
             _layoutViewportHeight = vpH;
             _layoutValid = true;
+        }
+
+        private void SyncInstanceLayouts()
+        {
+            if (_rootInstance == null)
+                return;
+
+            SyncInstanceLayoutsRecursive(_rootInstance);
+        }
+
+        private LayoutBox? SyncInstanceLayoutsRecursive(ComponentInstance instance)
+        {
+            foreach (var child in instance.Children)
+            {
+                SyncInstanceLayoutsRecursive(child);
+            }
+
+            if (instance.NativeElement is Win32Element native)
+            {
+                instance.Layout = new LayoutBox(native.AbsoluteX, native.AbsoluteY, native.LayoutWidth, native.LayoutHeight);
+                return instance.Layout;
+            }
+
+            if (instance.Children.Count == 1)
+            {
+                instance.Layout = instance.Children[0].Layout;
+                return instance.Layout;
+            }
+
+            var childLayouts = instance.Children.Select(c => c.Layout).Where(l => l.HasValue).Select(l => l!.Value).ToList();
+            if (childLayouts.Count == 0)
+            {
+                instance.Layout = null;
+                return null;
+            }
+
+            var left = childLayouts.Min(l => l.X);
+            var top = childLayouts.Min(l => l.Y);
+            var right = childLayouts.Max(l => l.X + l.Width);
+            var bottom = childLayouts.Max(l => l.Y + l.Height);
+            instance.Layout = new LayoutBox(left, top, right - left, bottom - top);
+            return instance.Layout;
         }
 
         private void CollectFloatingElements()
@@ -986,12 +1054,18 @@ namespace EchoUI.Render.Win32
         private void InvalidateElementBounds(Win32Element element)
         {
             const int padding = 3;
+            var shadowBlur = element.Shadow.IsVisible
+                ? (int)Math.Ceiling(Math.Max(0, element.Shadow.Blur))
+                : 0;
+            var shadowBottom = element.Shadow.IsVisible
+                ? (int)Math.Ceiling(Math.Max(0, element.Shadow.OffsetY + element.Shadow.Blur))
+                : 0;
             var rect = new NativeInterop.RECT
             {
-                Left = (int)Math.Floor(element.AbsoluteX) - padding,
+                Left = (int)Math.Floor(element.AbsoluteX) - padding - shadowBlur,
                 Top = (int)Math.Floor(element.AbsoluteY) - padding,
-                Right = (int)Math.Ceiling(element.AbsoluteX + element.LayoutWidth) + padding,
-                Bottom = (int)Math.Ceiling(element.AbsoluteY + element.LayoutHeight) + padding
+                Right = (int)Math.Ceiling(element.AbsoluteX + element.LayoutWidth) + padding + shadowBlur,
+                Bottom = (int)Math.Ceiling(element.AbsoluteY + element.LayoutHeight) + padding + shadowBottom
             };
 
             NativeInterop.InvalidateRect(_window.Hwnd, ref rect, false);

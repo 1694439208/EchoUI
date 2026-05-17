@@ -128,6 +128,7 @@ namespace EchoUI.Render.Web
                     domPatch.Styles["border-width"] = $"{containerProps.BorderWidth ?? 0}px";
                     domPatch.Styles["border-color"] = ToCss(containerProps.BorderColor ?? Color.Transparent);
                     domPatch.Styles["border-radius"] = $"{containerProps.BorderRadius ?? 0}px";
+                    domPatch.Styles["box-shadow"] = ToCss(containerProps.Shadow);
                     SetSpacingStyles(domPatch, "margin", containerProps.Margin, "0px");
                     SetSpacingStyles(domPatch, "padding", containerProps.Padding, "0px");
                     if (containerProps.Float)
@@ -251,6 +252,7 @@ namespace EchoUI.Render.Web
                         case nameof(ContainerProps.BorderColor): domPatch.SetStyle("border-color", ToCss(propValue as Color?)); break;
                         case nameof(ContainerProps.BorderWidth): domPatch.SetStyle("border-width", propValue != null ? $"{propValue}px" : null); break;
                         case nameof(ContainerProps.BorderRadius): domPatch.SetStyle("border-radius", propValue != null ? $"{propValue}px" : null); break;
+                        case nameof(ContainerProps.Shadow): domPatch.SetStyle("box-shadow", propValue is BoxShadow shadow ? ToCss(shadow) : "none"); break;
 
                         // --- Animation ---
                         case nameof(ContainerProps.Transitions):
@@ -363,6 +365,7 @@ namespace EchoUI.Render.Web
         #region CSS/DOM Converters
         private string? ToCss(Dimension? dim) => dim.HasValue ? dim.Value.Unit switch { DimensionUnit.Pixels => $"{dim.Value.Value}px", DimensionUnit.Percent => $"{dim.Value.Value}%", DimensionUnit.ViewportHeight => $"{dim.Value.Value}vh", _ => "" } : null;
         private string? ToCss(Color? color) => color.HasValue ? $"rgba({color.Value.R},{color.Value.G},{color.Value.B},{(float)color.Value.A / 255})" : null;
+        private string ToCss(BoxShadow? shadow) => shadow.HasValue && shadow.Value.IsVisible ? $"0px {shadow.Value.OffsetY}px {shadow.Value.Blur}px {ToCss((Color?)shadow.Value.Color)}" : "none";
         private string ToCss(LayoutDirection direction) => direction == LayoutDirection.Vertical ? "column" : "row";
         private string? ToCss(JustifyContent? jc) => jc switch
         {
@@ -418,6 +421,7 @@ namespace EchoUI.Render.Web
             nameof(ContainerProps.BorderColor) => "border-color",
             nameof(ContainerProps.BorderWidth) => "border-width",
             nameof(ContainerProps.BorderRadius) => "border-radius",
+            nameof(ContainerProps.Shadow) => "box-shadow",
             nameof(ContainerProps.Gap) => "gap",
             _ => null
         };

@@ -22,7 +22,7 @@ namespace EchoUI.Render.Win32
         [ThreadStatic]
         private static RectF s_effectiveClipRect;
 
-        public static void Paint(nint hdc, Win32Element root, IReadOnlyCollection<Win32Element>? floatingElements, float viewportWidth, float viewportHeight, RectF? dirtyRect = null, CpuBitmapSurface? bitmapSurface = null)
+        public static void Paint(nint hdc, Win32Element root, ComponentInstance? rootInstance, IReadOnlyCollection<Win32Element>? floatingElements, float viewportWidth, float viewportHeight, RectF? dirtyRect = null, CpuBitmapSurface? bitmapSurface = null)
         {
             using var gdiPlusScope = GdiPlus.BeginDraw(hdc);
             var viewportRect = new RectF(0, 0, viewportWidth, viewportHeight);
@@ -45,13 +45,33 @@ namespace EchoUI.Render.Win32
 
                 FillSolidRect(hdc, paintRect, Core.Color.White);
 
-                PaintElement(hdc, root, paintRect, floatingElements);
-
-                if (floatingElements != null)
+                if (rootInstance != null)
                 {
-                    foreach (var floatElem in floatingElements)
+                    var commands = PaintEngine.GenerateCommands(rootInstance);
+                    if (commands.Count > 0)
                     {
-                        PaintElement(hdc, floatElem, paintRect, null);
+                        Win32CommandExecutor.Execute(hdc, commands);
+                    }
+
+                    PaintOverlayElement(hdc, root, paintRect, floatingElements);
+                    if (floatingElements != null)
+                    {
+                        foreach (var floatElem in floatingElements)
+                        {
+                            PaintElement(hdc, floatElem, paintRect, null);
+                        }
+                    }
+                }
+                else
+                {
+                    PaintElement(hdc, root, paintRect, floatingElements);
+
+                    if (floatingElements != null)
+                    {
+                        foreach (var floatElem in floatingElements)
+                        {
+                            PaintElement(hdc, floatElem, paintRect, null);
+                        }
                     }
                 }
 
@@ -109,28 +129,12 @@ namespace EchoUI.Render.Win32
         {
             var hasDrawableBounds = bounds.Width > 0 && bounds.Height > 0;
 
-            if (hasDrawableBounds && element.ShadowColor is { A: > 0 })
+            if (hasDrawableBounds)
             {
-                Win32CommandExecutor.ExecuteSingle(hdc, new DrawShadow(
-                    new LayoutBox(bounds.X, bounds.Y, bounds.Width, bounds.Height),
-                    element.ShadowColor.Value, element.BorderWidth, element.BorderRadius));
-            }
-
-            // 背景绘制（覆盖阴影的上部，底部露出跟随圆角的阴影条）
-            if (hasDrawableBounds && element.BackgroundColor.HasValue && element.BackgroundColor.Value.A > 0)
-            {
-                FillShape(hdc, element, bounds, element.BackgroundColor.Value, element.BorderRadius);
-            }
-
-            // ShadowColor 时 BorderWidth 专用于阴影高度，不再画全包围边框
-            var hasShadow = element.ShadowColor is { A: > 0 };
-            if (!hasShadow && hasDrawableBounds && element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && element.BorderColor.HasValue)
-            {
-                DrawBorder(hdc, element, bounds, element.BorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
+                ExecutePaintCommands(hdc, element, bounds, ResolveContainerPaintElement(element));
             }
 
             var childClip = clipRect;
-            uint gdiPlusState = 0;
             var previousClipRect = s_effectiveClipRect;
             var clipChanged = false;
 
@@ -147,8 +151,6 @@ namespace EchoUI.Render.Win32
 
                     Win32CommandExecutor.ExecuteSingle(hdc, new PushClip(
                         new LayoutBox(clipRegion.X, clipRegion.Y, clipRegion.Width, clipRegion.Height)));
-                    gdiPlusState = GdiPlus.SaveGraphics();
-                    GdiPlus.IntersectClip(clipRegion);
                     childClip = clipRegion;
                     s_effectiveClipRect = clipRegion;
                     clipChanged = true;
@@ -164,11 +166,6 @@ namespace EchoUI.Render.Win32
                 if (clipChanged)
                 {
                     s_effectiveClipRect = previousClipRect;
-                }
-
-                if (gdiPlusState != 0)
-                {
-                    GdiPlus.RestoreGraphics(gdiPlusState);
                 }
 
                 if (clipChanged)
@@ -187,29 +184,155 @@ namespace EchoUI.Render.Win32
         {
             if (string.IsNullOrEmpty(element.Text)) return;
 
-            var fontSize = element.FontSize > 0 ? element.FontSize : 14f;
-            var color = element.TextColor ?? Core.Color.Black;
-            GdiPlus.Flush();
-            GdiText.DrawText(hdc, element.Text, element.FontFamily, fontSize, element.FontWeight, color, bounds, element.NoWrap);
+            ExecutePaintCommands(hdc, element, bounds, ResolveTextPaintElement(element));
         }
 
         private static void PaintInputBackground(nint hdc, Win32Element element, RectF bounds)
         {
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
-            if (element.BackgroundColor.HasValue)
-            {
-                FillShape(hdc, element, bounds, element.BackgroundColor.Value, element.BorderRadius);
-            }
-
             var effectiveBorderColor = element.IsFocused && element.FocusedBorderColor.HasValue
                 ? element.FocusedBorderColor
                 : element.BorderColor;
 
-            if (element.BorderWidth > 0 && element.BorderStyle != Core.BorderStyle.None && effectiveBorderColor.HasValue)
+            ExecutePaintCommands(hdc, element, bounds, ResolveInputBackgroundPaintElement(element, effectiveBorderColor));
+        }
+
+        private static void PaintOverlayElement(nint hdc, Win32Element element, RectF clipRect, IReadOnlyCollection<Win32Element>? skippedElements)
+        {
+            if (skippedElements != null && skippedElements.Contains(element))
+                return;
+
+            var bounds = element.GetAbsoluteBounds();
+            if (bounds.Right < clipRect.Left || bounds.Left > clipRect.Right ||
+                bounds.Bottom < clipRect.Top || bounds.Top > clipRect.Bottom)
             {
-                DrawBorder(hdc, element, bounds, effectiveBorderColor.Value, element.BorderWidth, element.BorderRadius, element.BorderStyle);
+                if (element.Overflow != Overflow.Visible || element.Children.Count == 0)
+                    return;
             }
+
+            if (element.ElementType == ElementCoreName.Input)
+            {
+                PaintInputBackground(hdc, element, bounds);
+            }
+            else if (element.ElementType == "img")
+            {
+                PaintImage(hdc, element, bounds);
+            }
+
+            var childClip = clipRect;
+            var previousClipRect = s_effectiveClipRect;
+            var clipChanged = false;
+
+            try
+            {
+                if (element.Overflow != Overflow.Visible)
+                {
+                    var clipRegion = RectF.Intersect(bounds, clipRect);
+                    if (clipRegion.Width <= 0 || clipRegion.Height <= 0)
+                        return;
+
+                    Win32CommandExecutor.ExecuteSingle(hdc, new PushClip(
+                        new LayoutBox(clipRegion.X, clipRegion.Y, clipRegion.Width, clipRegion.Height)));
+                    childClip = clipRegion;
+                    s_effectiveClipRect = clipRegion;
+                    clipChanged = true;
+                }
+
+                foreach (var child in element.Children)
+                {
+                    PaintOverlayElement(hdc, child, childClip, skippedElements);
+                }
+            }
+            finally
+            {
+                if (clipChanged)
+                {
+                    s_effectiveClipRect = previousClipRect;
+                    Win32CommandExecutor.ExecuteSingle(hdc, new PopClip());
+                }
+            }
+
+            if (element.Overflow == Overflow.Auto || element.Overflow == Overflow.Scroll)
+            {
+                PaintScrollbar(hdc, element, bounds);
+            }
+        }
+
+        private static void ExecutePaintCommands(nint hdc, Win32Element element, RectF bounds, Element paintElement)
+        {
+            var commands = PaintEngine.GenerateCommands(paintElement, ToLayoutBox(bounds));
+            if (commands.Count == 0) return;
+
+            Win32CommandExecutor.Execute(hdc, commands, element);
+        }
+
+        private static Element ResolveContainerPaintElement(Win32Element element)
+        {
+            if (element.OwnerInstance?.Element.Props is ContainerProps props)
+            {
+                return element.OwnerInstance.Element;
+            }
+
+            return new Element(ElementCoreName.Container, new ContainerProps
+            {
+                BackgroundColor = element.BackgroundColor,
+                BorderColor = element.BorderColor,
+                BorderStyle = element.BorderStyle,
+                BorderWidth = element.BorderWidth,
+                BorderRadius = element.BorderRadius,
+                Shadow = element.Shadow
+            });
+        }
+
+        private static Element ResolveInputBackgroundPaintElement(Win32Element element, Core.Color? effectiveBorderColor)
+        {
+            if (element.OwnerInstance?.Element.Props is InputProps inputProps)
+            {
+                return new Element(ElementCoreName.Container, new ContainerProps
+                {
+                    BackgroundColor = inputProps.BackgroundColor,
+                    BorderColor = effectiveBorderColor,
+                    BorderStyle = effectiveBorderColor.HasValue ? Core.BorderStyle.Solid : Core.BorderStyle.None,
+                    BorderWidth = effectiveBorderColor.HasValue ? 1f : 0f,
+                    BorderRadius = 0,
+                    Shadow = null
+                });
+            }
+
+            return new Element(ElementCoreName.Container, new ContainerProps
+            {
+                BackgroundColor = element.BackgroundColor,
+                BorderColor = effectiveBorderColor,
+                BorderStyle = element.BorderStyle,
+                BorderWidth = element.BorderWidth,
+                BorderRadius = element.BorderRadius,
+                Shadow = null
+            });
+        }
+
+        private static Element ResolveTextPaintElement(Win32Element element)
+        {
+            if (element.OwnerInstance?.Element.Props is TextProps)
+            {
+                return element.OwnerInstance.Element;
+            }
+
+            return new Element(ElementCoreName.Text, new TextProps
+            {
+                Text = element.Text ?? string.Empty,
+                FontFamily = element.FontFamily,
+                FontSize = element.FontSize > 0 ? (float?)element.FontSize : null,
+                Color = element.TextColor,
+                FontWeight = element.FontWeight,
+                MouseThrough = element.MouseThrough,
+                NoWrap = element.NoWrap
+            });
+        }
+
+        private static LayoutBox ToLayoutBox(RectF bounds)
+        {
+            return new LayoutBox(bounds.X, bounds.Y, bounds.Width, bounds.Height);
         }
 
         private static void PaintScrollbar(nint hdc, Win32Element element, RectF bounds)

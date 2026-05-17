@@ -237,10 +237,11 @@ namespace EchoUI.Render.Win32
             return from switch
             {
                 Color c => LerpColor(c, (Color)to, t),
+                BoxShadow shadow => LerpBoxShadow(shadow, (BoxShadow)to, t),
                 float f => f + ((float)to - f) * t,
                 int iv => iv + (int)(((int)to - iv) * t),
                 Dimension d => LerpDimension(d, (Dimension)to, t),
-                Spacing s => LerpSpacing(s, (Spacing)to, t),
+                Spacing spacing => LerpSpacing(spacing, (Spacing)to, t),
                 _ => t >= 1f ? to : from
             };
         }
@@ -253,6 +254,14 @@ namespace EchoUI.Render.Win32
                 (byte)Math.Clamp(Math.Round(from.B + (to.B - from.B) * t), 0, 255),
                 (byte)Math.Clamp(Math.Round(from.A + (to.A - from.A) * t), 0, 255)
             );
+        }
+
+        private static BoxShadow LerpBoxShadow(BoxShadow from, BoxShadow to, float t)
+        {
+            return new BoxShadow(
+                LerpColor(from.Color, to.Color, t),
+                from.OffsetY + (to.OffsetY - from.OffsetY) * t,
+                from.Blur + (to.Blur - from.Blur) * t);
         }
 
         private static Dimension LerpDimension(Dimension from, Dimension to, float t)
@@ -296,6 +305,7 @@ namespace EchoUI.Render.Win32
             {
                 nameof(Win32Element.BackgroundColor) => element.BackgroundColor,
                 nameof(Win32Element.BorderColor) => element.BorderColor,
+                nameof(Win32Element.Shadow) => element.Shadow,
                 nameof(Win32Element.BorderWidth) => element.BorderWidth,
                 nameof(Win32Element.BorderRadius) => element.BorderRadius,
                 nameof(Win32Element.Margin) => element.Margin,
@@ -320,6 +330,9 @@ namespace EchoUI.Render.Win32
                     break;
                 case nameof(Win32Element.BorderColor):
                     element.BorderColor = (Color?)value;
+                    break;
+                case nameof(Win32Element.Shadow):
+                    element.Shadow = value is BoxShadow shadow ? shadow : BoxShadow.None;
                     break;
                 case nameof(Win32Element.BorderWidth):
                     element.BorderWidth = value is float bw ? bw : 0;

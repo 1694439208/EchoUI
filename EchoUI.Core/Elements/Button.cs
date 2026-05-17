@@ -75,7 +75,7 @@ namespace EchoUI.Core
             var transitions = new ValueDictionary<string, Transition>(new Dictionary<string, Transition>
             {
                 [nameof(ContainerProps.BackgroundColor)] = new(140, Easing.EaseOut),
-                [nameof(ContainerProps.ShadowColor)] = new(140, Easing.EaseOut),
+                [nameof(ContainerProps.Shadow)] = new(140, Easing.EaseOut),
             });
 
             return Container(new ContainerProps
@@ -88,11 +88,8 @@ namespace EchoUI.Core
                 AlignItems = AlignItems.Center,
                 Padding = padding,
                 BackgroundColor = bg,
-                BorderStyle = BorderStyle.Solid,
-                BorderColor = shadow,
-                BorderWidth = shadowHeight,
                 BorderRadius = radius,
-                ShadowColor = shadow,
+                Shadow = new BoxShadow(shadow, shadowHeight),
                 Overflow = Overflow.Hidden,
                 Transitions = transitions,
                 Cursor = disabled ? "not-allowed" : null,

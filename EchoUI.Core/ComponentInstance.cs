@@ -11,6 +11,7 @@ namespace EchoUI.Core
         public Element Element { get; set; }
         public Delegate? ComponentDelegate => Element.Type.IsComponent || Element.Type.IsAsyncComponent ? Element.Type.AsComponentDelegate : null;
         public object? NativeElement { get; set; }
+        public LayoutBox? Layout { get; set; }
         public ComponentInstance? Parent { get; set; }
         public List<ComponentInstance> Children { get; set; } = [];
 

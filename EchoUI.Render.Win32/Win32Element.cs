@@ -23,7 +23,7 @@ namespace EchoUI.Render.Win32
     /// Win32 自绘元素节点，存储布局结果、样式属性和事件处理器。
     /// 每个 Win32Element 对应 EchoUI 元素树中的一个原生元素。
     /// </summary>
-    internal class Win32Element
+    internal class Win32Element : ILayoutNode<Win32Element>
     {
         /// <summary>
         /// 元素类型：Container / Text / Input 或自定义原生类型
@@ -52,6 +52,7 @@ namespace EchoUI.Render.Win32
         public float AbsoluteX { get; set; }
         public float AbsoluteY { get; set; }
         public RectF AbsoluteBounds { get; private set; }
+        public ComponentInstance? OwnerInstance { get; set; }
 
         // --- 尺寸属性 ---
         public Dimension? Width { get; set; }
@@ -82,7 +83,7 @@ namespace EchoUI.Render.Win32
         public BorderStyle BorderStyle { get; set; } = BorderStyle.None;
         public float BorderWidth { get; set; }
         public float BorderRadius { get; set; }
-        public Core.Color? ShadowColor { get; set; }
+        public BoxShadow Shadow { get; set; } = BoxShadow.None;
         public float Opacity { get; set; } = 1f;
         public string? Cursor { get; set; }
 
@@ -147,6 +148,10 @@ namespace EchoUI.Render.Win32
         public int IntrinsicHeightCacheVersion { get; set; } = -1;
         public float IntrinsicHeightCacheConstraint { get; set; }
         public float CachedIntrinsicHeight { get; set; }
+
+        IReadOnlyList<Win32Element> ILayoutNode<Win32Element>.LayoutChildren => Children;
+
+        void ILayoutNode<Win32Element>.CommitLayout() => UpdateAbsoluteBounds();
 
         public Win32Element(string elementType)
         {

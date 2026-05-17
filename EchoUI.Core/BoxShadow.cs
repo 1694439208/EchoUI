@@ -4,4 +4,6 @@ namespace EchoUI.Core;
 public readonly record struct BoxShadow(Color Color, float OffsetY, float Blur = 0)
 {
     public static readonly BoxShadow None = default;
+
+    public bool IsVisible => Color.A > 0 && (OffsetY != 0 || Blur > 0);
 }

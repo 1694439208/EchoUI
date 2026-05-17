@@ -352,7 +352,7 @@ namespace EchoUI.Render.Win32
                         CpuBitmapSurface? bitmapSurface = _backBufferBits != 0
                             ? new CpuBitmapSurface(_backBufferBits, w, h, _backBufferStride)
                             : null;
-                        GdiPainter.Paint(memoryDc, _renderer.RootElement, _renderer.FloatingElements, w, h, dirtyRect, bitmapSurface);
+                        GdiPainter.Paint(memoryDc, _renderer.RootElement, _renderer.RootInstance, _renderer.FloatingElements, w, h, dirtyRect, bitmapSurface);
 
                         var nativeDirty = ToNativeRect(dirtyRect);
                         NativeInterop.BitBlt(

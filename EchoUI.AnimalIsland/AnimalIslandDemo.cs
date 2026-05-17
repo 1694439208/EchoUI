@@ -370,7 +370,7 @@ public static class AnimalIslandDemo
         var transitions = new ValueDictionary<string, Transition>(new Dictionary<string, Transition>
         {
             [nameof(ContainerProps.BackgroundColor)] = new(140, Easing.EaseOut),
-            [nameof(ContainerProps.BorderWidth)] = new(140, Easing.EaseOut),
+            [nameof(ContainerProps.Shadow)] = new(140, Easing.EaseOut),
             [nameof(ContainerProps.Margin)] = new(140, Easing.EaseOut),
         });
 
@@ -398,9 +398,8 @@ public static class AnimalIslandDemo
                     AlignItems = AlignItems.Center,
                     Padding = new Spacing(Dimension.Pixels(sz.PaddingX), Dimension.Pixels(0)),
                     BackgroundColor = bg,
-                    BorderWidth = shadowH,
                     BorderRadius = radius,
-                    ShadowColor = shadowBase,
+                    Shadow = new BoxShadow(shadowBase, shadowH),
                     Cursor = disabled ? "not-allowed" : null,
                     Opacity = disabled ? 0.5f : 1f,
                     Margin = new Spacing(topMargin, Dimension.Pixels(0), Dimension.Pixels(0), Dimension.Pixels(0)),
@@ -521,7 +520,7 @@ public static class AnimalIslandDemo
 
     public static Element AICard(string title, string emoji, Color accent, string description)
     {
-        // 静态 border-as-shadow，无 hover 动画（避免 layout 抖动）
+        // 静态 BoxShadow，无 hover 动画（避免 layout 抖动）
         var shadowCol = new Color(107, 92, 67, 107); // rgba(107,92,67,0.42)
         const float shadowH = 4f;
 
@@ -531,9 +530,7 @@ public static class AnimalIslandDemo
             Padding = new Spacing(Dimension.Pixels(24)),
             BackgroundColor = DesignTokens.BgContent,
             BorderRadius = 20,
-            BorderStyle = BorderStyle.Solid,
-            BorderColor = shadowCol,
-            BorderWidth = shadowH,
+            Shadow = new BoxShadow(shadowCol, shadowH),
             Direction = LayoutDirection.Vertical,
             Gap = 12,
             AlignItems = AlignItems.Center,
